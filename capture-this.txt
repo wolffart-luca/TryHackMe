@@ -1,0 +1,27 @@
+TryHackMe
+Capture This
+
+Nmap
+
+nmap -p 80 -sS -sC -sV -n -Pn 10.10.156.240 -oN nmap
+• 80/tcp open http Werkzeug/2.2.2 Python/3.8.10
+
+Fuzzing
+
+gobuster dir -u http://10.10.156.240 -w /usr/share/dirbuster/wordlists/directory-list-lowercase-2.3-medium.txt
+• /home
+• /login
+
+Observamos un login y intentamos un ataque con Hydra.
+
+hydra -L /usr/share/wordlists/names/names.txt -P /usr/share/wordlists/rockyou.txt "http-post-form://10.10.156.240/login:username=^USER^&password=^PASS^:Error"
+
+Al intentar usar Hydra, notamos que hay un captcha, lo que evita el uso de fuerza bruta.
+
+Buscamos y encontramos el siguiente GitHub donde la fuerza bruta se realiza mediante Python.
+
+https://github.com/BabdCatha/Capture
+
+Ejecutamos ambos scripts. Primero, el que busca usuarios, y una vez obtenido el usuario, utilizamos el segundo para encontrar la contraseña.
+
+Al ingresar, obtenemos la flag requerida.

